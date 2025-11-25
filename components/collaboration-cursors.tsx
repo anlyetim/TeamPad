@@ -1,10 +1,31 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { useHaloboardStore } from "@/lib/store"
 import { MousePointer2 } from "lucide-react"
+import { getCollaborationManager } from "@/lib/collaboration"
+import type { Point } from "@/lib/types"
 
 export function CollaborationCursors() {
-  const { users, currentUserId, zoom, panX, panY } = useHaloboardStore()
+  const { users, currentUserId, zoom, panX, panY, updateUserCursor } = useHaloboardStore()
+  // Force re-render on cursor updates if store doesn't trigger it fast enough
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+      const manager = getCollaborationManager()
+      if (!manager) return
+
+      // In a real implementation with Firestore onSnapshot, the store updates automatically.
+      // However, for smoother animation, sometimes a direct subscription or requestAnimationFrame loop is used.
+      // Here we rely on the store updates triggered by the manager.
+      
+      const interval = setInterval(() => {
+          // Force refresh to smooth out interpolation if needed
+          setTick(t => t + 1)
+      }, 50)
+      
+      return () => clearInterval(interval)
+  }, [])
 
   // Filter out current user and users without cursor position
   // Also filter out users inactive for > 5 minutes (cleanup visually)

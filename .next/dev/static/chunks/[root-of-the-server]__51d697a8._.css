@@ -3223,6 +3223,10 @@
     user-select: none;
   }
 
+  .slide-in-from-left-5 {
+    --tw-enter-translate-x: calc(.05 * -100%);
+  }
+
   .zoom-in-95 {
     --tw-enter-scale: .95;
   }

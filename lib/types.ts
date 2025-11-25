@@ -180,3 +180,4 @@ export type BroadcastMessage =
   | { type: "OBJECT_DELETE"; objectId: string }
   | { type: "USER_JOIN"; user: User }
   | { type: "USER_LEAVE"; userId: string }
+  | { type: "CHAT_MESSAGE"; message: ChatMessage }

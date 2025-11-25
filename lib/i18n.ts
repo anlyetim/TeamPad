@@ -3,6 +3,12 @@ import type { Language } from "@/lib/types"
 
 const translations = {
   en: {
+    // ... existing
+    joinProject: "Join Project",
+    enterCode: "Enter Code",
+    nickname: "Nickname",
+    join: "Join",
+    // ... existing
     dashboard: "Dashboard",
     myBoards: "My Boards",
     recent: "Recent",
@@ -15,7 +21,6 @@ const translations = {
     continueOldProject: "Would you like to continue your old project?",
     yesContinue: "Yes, continue",
     noDashboard: "No, go to dashboard",
-    // ... existing keys
     gridType: "Grid Type",
     dots: "Dots",
     lines: "Lines",
@@ -85,6 +90,12 @@ const translations = {
     }
   },
   tr: {
+    // ... existing
+    joinProject: "Projeye Katıl",
+    enterCode: "Kodu Girin",
+    nickname: "Takma Ad",
+    join: "Katıl",
+    // ... existing
     dashboard: "Kontrol Paneli",
     myBoards: "Panolarım",
     recent: "Son Kullanılanlar",
@@ -97,7 +108,6 @@ const translations = {
     continueOldProject: "Eski projenize devam etmek ister misiniz?",
     yesContinue: "Evet, devam et",
     noDashboard: "Hayır, panele git",
-    // ... existing keys
     gridType: "Izgara Tipi",
     dots: "Noktalar",
     lines: "Çizgiler",
@@ -167,6 +177,12 @@ const translations = {
     }
   },
   ru: {
+    // ... existing
+    joinProject: "Присоединиться к проекту",
+    enterCode: "Введите код",
+    nickname: "Псевдоним",
+    join: "Присоединиться",
+    // ... existing
     dashboard: "Панель управления",
     myBoards: "Мои доски",
     recent: "Недавние",
@@ -179,7 +195,6 @@ const translations = {
     continueOldProject: "Хотите продолжить старый проект?",
     yesContinue: "Да, продолжить",
     noDashboard: "Нет, на панель",
-    // ... existing keys
     gridType: "Тип Сетки",
     dots: "Точки",
     lines: "Линии",
@@ -249,6 +264,12 @@ const translations = {
     }
   },
   es: {
+    // ... existing
+    joinProject: "Unirse al proyecto",
+    enterCode: "Introducir código",
+    nickname: "Apodo",
+    join: "Unirse",
+    // ... existing
     dashboard: "Tablero",
     myBoards: "Mis Pizarras",
     recent: "Recientes",
@@ -261,7 +282,6 @@ const translations = {
     continueOldProject: "¿Quieres continuar tu proyecto anterior?",
     yesContinue: "Sí, continuar",
     noDashboard: "No, ir al tablero",
-    // ... existing keys
     gridType: "Tipo de Cuadrícula",
     dots: "Puntos",
     lines: "Líneas",

@@ -13,16 +13,36 @@ interface InviteModalProps {
 }
 
 export function InviteModal({ isOpen, onClose }: InviteModalProps) {
-  const { highlightColor } = useHaloboardStore()
+  const { highlightColor, currentProjectId } = useHaloboardStore()
   const { t } = useTranslation()
   const { toast } = useToast()
   
   if (!isOpen) return null
 
-  const handleCopyLink = () => {
-    // Dummy copy action
-    navigator.clipboard.writeText("https://teampad.app/project/shared-id")
-    toast({ description: "Link copied to clipboard!", duration: 2000 })
+  const handleCopyLink = async () => {
+    const codeToCopy = currentProjectId || ""
+    
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(codeToCopy);
+        } else {
+            // Fallback for non-secure contexts (like HTTP local IP)
+            const textArea = document.createElement("textarea");
+            textArea.value = codeToCopy;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            textArea.style.top = "0";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            document.execCommand('copy');
+            textArea.remove();
+        }
+        toast({ description: "Project code copied to clipboard!", duration: 2000 })
+    } catch (err) {
+        console.error('Failed to copy: ', err);
+        toast({ description: "Failed to copy code.", variant: "destructive" })
+    }
   }
 
   return (
@@ -51,7 +71,7 @@ export function InviteModal({ isOpen, onClose }: InviteModalProps) {
           
           <div className="space-y-3">
             <p className="text-sm text-neutral-600 dark:text-neutral-400">
-              Collaborate with your team by sharing this link.
+              Share this code with your friends to let them join your project.
             </p>
             
             <div className="flex items-center gap-2">
@@ -59,8 +79,8 @@ export function InviteModal({ isOpen, onClose }: InviteModalProps) {
                     <Link className="absolute left-2 top-2.5 size-4 text-neutral-500" />
                     <Input 
                         readOnly 
-                        value="https://teampad.app/project/shared-id" 
-                        className="pl-8 bg-neutral-100 dark:bg-neutral-800 border-transparent"
+                        value={currentProjectId || "No Project ID"} 
+                        className="pl-8 bg-neutral-100 dark:bg-neutral-800 border-transparent font-mono font-medium text-center"
                     />
                 </div>
                 <Button 

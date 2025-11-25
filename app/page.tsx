@@ -10,16 +10,17 @@ import { FloatingChatMessages } from "@/components/floating-chat-messages"
 import { Dashboard } from "@/components/dashboard"
 import { WelcomeModal } from "@/components/welcome-modal"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { Smartphone, Maximize2, LayoutGrid } from "lucide-react"
+import { Smartphone, Maximize2, LayoutGrid, Bell } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useHaloboardStore } from "@/lib/store"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { Toaster } from "@/components/ui/toaster"
 
 export default function Home() {
   const isMobile = useIsMobile()
   const { theme } = useTheme()
-  const { activeView, isProjectMinimized, setIsProjectMinimized, canvasSettings, highlightColor } = useHaloboardStore()
+  const { activeView, isProjectMinimized, setIsProjectMinimized, canvasSettings, highlightColor, notifications } = useHaloboardStore()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => setMounted(true), [])
@@ -45,6 +46,19 @@ export default function Home() {
 
   return (
     <div className="relative h-screen w-full overflow-hidden transition-colors duration-300" style={{ backgroundColor: bgColor }}>
+      {/* Notifications Layer */}
+      <Toaster />
+      <div className="absolute bottom-4 left-4 z-[100] flex flex-col gap-2 pointer-events-none">
+         {notifications.map((n) => (
+            <div key={n.id} className="flex items-center gap-3 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 p-3 rounded-lg shadow-lg animate-in slide-in-from-left-5 fade-in duration-300 pointer-events-auto max-w-xs">
+                <div className="p-1.5 bg-[#0A84FF]/10 rounded-full">
+                   <Bell className="size-4 text-[#0A84FF]" />
+                </div>
+                <span className="text-sm font-medium">{n.message}</span>
+            </div>
+         ))}
+      </div>
+
       {/* Welcome Modal on mount */}
       <WelcomeModal />
 
@@ -63,8 +77,8 @@ export default function Home() {
         className={cn(
           "absolute transition-all duration-700 ease-[cubic-bezier(0.25,1,0.5,1)] shadow-2xl overflow-hidden bg-background",
           isProjectMinimized
-            ? "w-64 h-16 right-6 bottom-6 rounded-xl border border-neutral-200 dark:border-neutral-800 hover:scale-105 cursor-pointer z-50 translate-y-0 opacity-100 bg-white dark:bg-[#1E1E1E]" // Minimized: Bottom right, small bar
-            : "inset-0 z-0 rounded-none translate-y-0" // Maximized: Full screen
+            ? "w-64 h-16 right-6 bottom-6 rounded-xl border border-neutral-200 dark:border-neutral-800 hover:scale-105 cursor-pointer z-50 translate-y-0 opacity-100 bg-white dark:bg-[#1E1E1E]"
+            : "inset-0 z-0 rounded-none translate-y-0"
         )}
         onClick={() => {
           if (isProjectMinimized) setIsProjectMinimized(false)

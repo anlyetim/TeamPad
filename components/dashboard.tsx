@@ -5,7 +5,7 @@ import { useHaloboardStore } from "@/lib/store"
 import { useTranslation } from "@/lib/i18n"
 import { 
   LayoutGrid, Clock, Star, Users, Trash2, Search, Plus, 
-  MoreVertical, Settings, LogOut 
+  MoreVertical, Settings, LogOut, Users2
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -23,13 +23,14 @@ export function Dashboard() {
     loadProjectById, 
     deleteProject, 
     highlightColor,
-    canvasSettings
+    joinProject // store action
   } = useHaloboardStore()
   
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState("dashboard")
   const [showSettings, setShowSettings] = useState(false)
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
+  const [showJoinModal, setShowJoinModal] = useState(false) // Join Modal State
   const [searchQuery, setSearchQuery] = useState("")
 
   // New Project State
@@ -38,6 +39,10 @@ export function Dashboard() {
   const [projectWidth, setProjectWidth] = useState(1920)
   const [projectHeight, setProjectHeight] = useState(1080)
   const [projectBg, setProjectBg] = useState("#ffffff")
+
+  // Join Project State
+  const [joinCode, setJoinCode] = useState("")
+  const [nickname, setNickname] = useState("")
 
   const filteredProjects = projects.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -62,10 +67,40 @@ export function Dashboard() {
      setShowNewProjectModal(false)
   }
 
+  const handleJoinProject = () => {
+     if (joinCode.trim() && nickname.trim()) {
+         joinProject(joinCode.trim(), nickname.trim())
+         setShowJoinModal(false)
+     }
+  }
+
   return (
     <div className="flex h-screen w-full bg-[#F9F9F9] dark:bg-[#171717] text-neutral-900 dark:text-neutral-100">
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
       
+      {/* Join Project Modal */}
+      {showJoinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="relative w-full max-w-md rounded-xl border border-white/20 bg-white/95 p-6 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-neutral-900/95 transition-all" style={{ "--ring": highlightColor } as React.CSSProperties}>
+            <button onClick={() => setShowJoinModal(false)} className="absolute right-4 top-4 rounded-lg p-1 hover:bg-black/5 dark:hover:bg-white/5"><X className="size-5 text-neutral-600 dark:text-neutral-400" /></button>
+            <h2 className="text-xl font-bold text-neutral-800 dark:text-neutral-200 mb-6">{t("joinProject")}</h2>
+            <div className="space-y-4">
+               <div className="space-y-2">
+                   <Label>{t("enterCode")}</Label>
+                   <Input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. AB12CD" className="focus-visible:ring-[var(--ring)]" />
+               </div>
+               <div className="space-y-2">
+                   <Label>{t("nickname")}</Label>
+                   <Input value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="Your Name" className="focus-visible:ring-[var(--ring)]" />
+               </div>
+               <Button onClick={handleJoinProject} className="w-full hover:opacity-90 gap-2" style={{ backgroundColor: highlightColor }}>
+                   {t("join")}
+               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* New Project Modal (Reused Logic) */}
       {showNewProjectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -147,7 +182,16 @@ export function Dashboard() {
           </button>
         </div>
 
-        <div className="mt-auto p-4">
+        <div className="mt-auto p-4 space-y-3">
+          <Button 
+             variant="outline"
+             onClick={() => setShowJoinModal(true)}
+             className="w-full gap-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 border-dashed"
+          >
+             <Users2 className="size-4" />
+             {t("joinProject")}
+          </Button>
+          
           <Button 
             onClick={() => setShowNewProjectModal(true)}
             className="w-full gap-2 text-white"

@@ -22,6 +22,12 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
   image: "i",
 }
 
+interface Notification {
+    id: string
+    message: string
+    type: 'info' | 'success'
+}
+
 interface HaloboardState {
   activeView: "dashboard" | "canvas"
   setActiveView: (view: "dashboard" | "canvas") => void
@@ -34,7 +40,12 @@ interface HaloboardState {
   saveCurrentProject: (thumbnail?: string) => void
   loadProjectById: (id: string) => void
   createNewProject: (settings: CanvasSettings) => void
+  joinProject: (code: string, nickname: string) => void
   deleteProject: (id: string) => void
+
+  notifications: Notification[]
+  addNotification: (message: string) => void
+  removeNotification: (id: string) => void
 
   projectKey: string
   setProjectKey: (key: string) => void
@@ -74,6 +85,7 @@ interface HaloboardState {
   updateUserCursor: (userId: string, position: Point, name?: string, color?: string) => void
   
   chatMessages: ChatMessage[]
+  addChatMessage: (message: ChatMessage, isRemote?: boolean) => void
 
   zoom: number
   panX: number
@@ -122,7 +134,6 @@ interface HaloboardState {
   addUser: (user: User) => void
   updateUser: (id: string, updates: Partial<User>) => void
   removeUser: (id: string) => void
-  addChatMessage: (message: ChatMessage) => void
   setZoom: (zoom: number) => void
   setPan: (x: number, y: number) => void
   setIsPanning: (isPanning: boolean) => void
@@ -143,6 +154,27 @@ export const useHaloboardStore = create<HaloboardState>()(
 
       projects: [],
       currentProjectId: null,
+
+      notifications: [],
+      addNotification: (message) => {
+          const id = Math.random().toString(36).substr(2, 9)
+          set(state => ({ notifications: [...state.notifications, { id, message, type: 'info' }] }))
+          setTimeout(() => get().removeNotification(id), 5000)
+      },
+      removeNotification: (id) => set(state => ({ notifications: state.notifications.filter(n => n.id !== id) })),
+
+      joinProject: (code, nickname) => {
+          const newId = code
+          const myColor = generateColor()
+          set(state => ({
+              currentUserId: initialUserId,
+              users: [{ id: initialUserId, name: nickname, color: myColor, lastActive: Date.now() }],
+              currentProjectId: newId,
+              activeView: "canvas",
+              isProjectMinimized: false
+          }))
+          get().addNotification(`Joined project: ${code} as ${nickname}`)
+      },
 
       saveCurrentProject: (thumbnail) => {
         const state = get()
@@ -241,6 +273,10 @@ export const useHaloboardStore = create<HaloboardState>()(
       
       updateUserCursor: (userId, position, name, color) => set((state) => {
          const existingUser = state.users.find(u => u.id === userId)
+         if (!existingUser) {
+            get().addNotification(`${name || "Someone"} joined!`)
+         }
+         
          if (existingUser) {
             return {
                 users: state.users.map(u => u.id === userId ? { ...u, cursor: position, lastActive: Date.now() } : u)
@@ -253,6 +289,13 @@ export const useHaloboardStore = create<HaloboardState>()(
       }),
 
       chatMessages: [],
+      addChatMessage: (message, isRemote = false) => {
+          set((state) => ({ chatMessages: [...state.chatMessages, message] }))
+          if (!isRemote) {
+              const manager = getCollaborationManager()
+              if (manager) manager.broadcastChat(message)
+          }
+      },
 
       zoom: 1,
       panX: 0,
@@ -316,19 +359,14 @@ export const useHaloboardStore = create<HaloboardState>()(
 
       updateObject: (id, updates, isRemote = false) => {
         set((state) => {
-          // Check if object actually exists/needs update to save perf
           const obj = state.objects.find(o => o.id === id)
           if (!obj) return state
 
-          // If full object is passed via updates (from remote), use it with caution
-          // but standard update uses partial. 
-          // For remote sync of full object:
           const newObjects = state.objects.map((o) => (o.id === id ? { ...o, ...updates } : o))
           return { objects: newObjects }
         })
         
         if (!isRemote) {
-           // Debounce or throttle this in real app, but here we emit direct
            const state = get()
            const updatedObj = state.objects.find(o => o.id === id)
            if (updatedObj) {
@@ -336,9 +374,6 @@ export const useHaloboardStore = create<HaloboardState>()(
                if (manager) manager.broadcastObject(updatedObj)
            }
         }
-        
-        // Only save to disk/storage occasionally to prevent lag, or let the auto-save indicator handle it
-        // get().saveCurrentProject() -> Handled by auto-save logic mostly
       },
 
       deleteObject: (id, isRemote = false) => {
@@ -513,7 +548,7 @@ export const useHaloboardStore = create<HaloboardState>()(
       addUser: (user) => set((state) => ({ users: [...state.users, user] })),
       updateUser: (id, updates) => set((state) => ({ users: state.users.map((user) => (user.id === id ? { ...user, ...updates } : user)) })),
       removeUser: (id) => set((state) => ({ users: state.users.filter((user) => user.id !== id) })),
-      addChatMessage: (message) => set((state) => ({ chatMessages: [...state.chatMessages, message] })),
+      
       setZoom: (zoom) => set({ zoom: Math.max(0.1, Math.min(zoom, 5)) }),
       setPan: (x, y) => set({ panX: x, panY: y }),
       setIsPanning: (isPanning) => set({ isPanning }),
@@ -523,7 +558,6 @@ export const useHaloboardStore = create<HaloboardState>()(
     {
       name: 'haloboard-storage',
       partialize: (state) => ({
-        // ... (same as before)
         highlightColor: state.highlightColor,
         maxUndoSteps: state.maxUndoSteps,
         brushSettings: state.brushSettings,
@@ -537,7 +571,7 @@ export const useHaloboardStore = create<HaloboardState>()(
         currentProjectId: state.currentProjectId,
         isProjectMinimized: state.isProjectMinimized,
         activeView: state.activeView,
-        currentUserId: state.currentUserId // Persist user ID to keep identity
+        currentUserId: state.currentUserId
       }),
     }
   )

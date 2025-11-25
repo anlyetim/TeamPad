@@ -6,13 +6,15 @@ import { useState, useRef, useEffect } from "react"
 import { useHaloboardStore } from "@/lib/store"
 import { MessageSquare, Send, X, Minimize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useTranslation } from "@/lib/i18n"
 
 export function ChatPanel() {
   const [message, setMessage] = useState("")
   const [isMinimized, setIsMinimized] = useState(false)
   const chatRef = useRef<HTMLDivElement>(null)
+  const { t } = useTranslation()
 
-  const { chatMessages, addChatMessage, users, currentUserId, showChat, toggleChat } = useHaloboardStore()
+  const { chatMessages, addChatMessage, users, currentUserId, showChat, toggleChat, highlightColor } = useHaloboardStore()
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -24,6 +26,7 @@ export function ChatPanel() {
   const handleSendMessage = () => {
     if (!message.trim()) return
 
+    // This action now handles broadcasting internally via store logic
     addChatMessage({
       id: `msg-${Date.now()}`,
       userId: currentUserId,
@@ -50,7 +53,8 @@ export function ChatPanel() {
     return (
       <button
         onClick={toggleChat}
-        className="fixed bottom-20 right-4 z-30 flex size-12 items-center justify-center rounded-full bg-[#0A84FF] text-white shadow-lg transition-transform hover:scale-110"
+        className="fixed bottom-20 right-4 z-30 flex size-12 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-110"
+        style={{ backgroundColor: highlightColor }}
       >
         <MessageSquare className="size-5" />
       </button>
@@ -66,9 +70,12 @@ export function ChatPanel() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 p-3 dark:border-neutral-800">
         <div className="flex items-center gap-2">
-          <MessageSquare className="size-5 text-[#0A84FF]" />
-          <h3 className="font-semibold text-neutral-800 dark:text-neutral-200">Chat</h3>
-          <span className="rounded-full bg-[#0A84FF]/10 px-2 py-0.5 text-xs font-medium text-[#0A84FF]">
+          <MessageSquare className="size-5" style={{ color: highlightColor }} />
+          <h3 className="font-semibold text-neutral-800 dark:text-neutral-200">{t("chat")}</h3>
+          <span 
+            className="rounded-full px-2 py-0.5 text-xs font-medium"
+            style={{ backgroundColor: `${highlightColor}20`, color: highlightColor }}
+          >
             {users.length} online
           </span>
         </div>
@@ -93,7 +100,7 @@ export function ChatPanel() {
             {chatMessages.length === 0 ? (
               <div className="flex h-full items-center justify-center">
                 <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                  No messages yet. Start the conversation!
+                  No messages yet.
                 </p>
               </div>
             ) : (
@@ -105,9 +112,11 @@ export function ChatPanel() {
                   <div key={msg.id} className={`flex gap-2 ${isCurrentUser ? "flex-row-reverse" : ""}`}>
                     {/* Avatar */}
                     <div
-                      className="size-8 flex-shrink-0 rounded-full"
+                      className="size-8 flex-shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white"
                       style={{ backgroundColor: user?.color || "#999999" }}
-                    />
+                    >
+                       {user?.name?.charAt(0).toUpperCase() || "?"}
+                    </div>
 
                     {/* Message Content */}
                     <div className={`flex flex-col gap-1 ${isCurrentUser ? "items-end" : ""}`}>
@@ -123,11 +132,12 @@ export function ChatPanel() {
                         </span>
                       </div>
                       <div
-                        className={`max-w-xs rounded-lg px-3 py-2 text-sm ${
+                        className={`max-w-xs rounded-lg px-3 py-2 text-sm break-words ${
                           isCurrentUser
-                            ? "bg-[#0A84FF] text-white"
+                            ? "text-white"
                             : "bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200"
                         }`}
+                        style={isCurrentUser ? { backgroundColor: highlightColor } : {}}
                       >
                         {msg.content}
                       </div>
@@ -147,12 +157,14 @@ export function ChatPanel() {
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Type a message..."
-                className="flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0A84FF] focus:ring-2 focus:ring-[#0A84FF]/20 dark:border-neutral-700 dark:bg-neutral-800"
+                className="flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 dark:border-neutral-700 dark:bg-neutral-800"
+                style={{ "--ring": highlightColor } as React.CSSProperties}
               />
               <Button
                 onClick={handleSendMessage}
                 disabled={!message.trim()}
-                className="bg-[#0A84FF] hover:bg-[#0A84FF]/90"
+                className="hover:opacity-90"
+                style={{ backgroundColor: highlightColor }}
               >
                 <Send className="size-4" />
               </Button>
