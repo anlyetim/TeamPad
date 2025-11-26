@@ -98,6 +98,19 @@ export class CollaborationManager {
         store.addUser(message.user)
         // Broadcast our own user info back to the newly joined user
         this.broadcastUserJoin()
+        // Ensure our own user object has a cursor
+        const boardState = useHaloboardStore.getState()
+        const hostUser = boardState.users.find(u => u.id === this.userId)
+        if (hostUser && !hostUser.cursor) {
+          // Set to center or last position (fallback)
+          const container = document.querySelector('.absolute.inset-0.w-full.h-full.overflow-hidden') as HTMLDivElement | null
+          let pos = { x: 100, y: 100 }
+          if (container) {
+            const rect = container.getBoundingClientRect()
+            pos = { x: rect.width/2, y: rect.height/2 }
+          }
+          useHaloboardStore.getState().updateUserCursor(this.userId, pos, hostUser.name, hostUser.color)
+        }
         // Broadcast all current cursor positions to ensure visibility
         const allUsers = useHaloboardStore.getState().users
         allUsers.forEach(user => {
