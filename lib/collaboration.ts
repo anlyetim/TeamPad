@@ -11,6 +11,11 @@ export async function checkProjectExists(projectId: string): Promise<boolean> {
         return false;
     }
     try {
+        // Kontrol etmeden önce anonim giriş yapıldığından emin ol (Firestore kuralları için)
+        if (auth && !auth.currentUser) {
+            await signInAnonymously(auth);
+        }
+        
         const docRef = doc(db, "projects", projectId);
         const docSnap = await getDoc(docRef);
         return docSnap.exists();

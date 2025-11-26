@@ -11,8 +11,21 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Uygulama daha önce başlatılmadıysa başlat, aksi halde mevcut olanı al
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Global değişkenler (Build sırasında hata almamak için try-catch bloğu)
+let app;
+let db: any;
+let auth: any;
 
-export const db = getFirestore(app);
-export const auth = getAuth(app);
+if (firebaseConfig.apiKey) {
+  try {
+    app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+    db = getFirestore(app);
+    auth = getAuth(app);
+  } catch (error) {
+    console.error("Firebase initialization error:", error);
+  }
+} else {
+  console.warn("Firebase config missing (Build time or env vars missing)");
+}
+
+export { db, auth };
