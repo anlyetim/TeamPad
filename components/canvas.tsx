@@ -3,11 +3,11 @@
 import type React from "react"
 import { useEffect, useRef, useState } from "react"
 import { useHaloboardStore } from "@/lib/store"
-import type { Point, CanvasObject, PathData, ShapeData, TextData, NoteData, ImageData, AnchorPosition } from "@/lib/types"
+import type { Point, CanvasObject, PathData, ShapeData, TextData, NoteData, ImageData } from "@/lib/types"
 import { useCollaboration } from "@/lib/collaboration"
 import { useTheme } from "next-themes"
 import { useTranslation } from "@/lib/i18n"
-import { MousePointer2, Crown } from "lucide-react" // Added Crown import
+import { MousePointer2, Crown } from "lucide-react"
 import { CollaborationCursors } from "./collaboration-cursors"
 
 export function Canvas() {
@@ -65,13 +65,17 @@ export function Canvas() {
     keybindings,
     currentUserId,
     currentProjectId,
-    users 
+    users,
+    isOnline // Store'dan online durumunu çekiyoruz
   } = useHaloboardStore()
 
   const collaboration = useCollaboration(currentProjectId, currentUserId)
   
-  // Find current user data for cursor styling
+  // Mevcut kullanıcıyı bul
   const currentUser = users.find(u => u.id === currentUserId)
+
+  // İmleç rengini belirle: Online ise kullanıcı rengi, Offline ise Gri
+  const cursorColor = (isOnline && currentUser) ? currentUser.color : "#71717a" 
 
   useEffect(() => {
     const canvas = canvasRef.current; const container = containerRef.current
@@ -214,8 +218,9 @@ export function Canvas() {
       ctx.restore()
     }
 
-    // Only draw the "Round Dot" (brush preview) if we are using brush/eraser
-    if ((activeTool === 'brush' || activeTool === 'eraser') && currentMousePos) {
+    // YALNIZCA ONLINE MODDA: Fırça/Silgi kullanırken fırça ucu önizlemesi (yuvarlak) göster.
+    // Offline modda kullanıcı sadece ok imleci istediği için bu yuvarlağı gizliyoruz.
+    if (isOnline && (activeTool === 'brush' || activeTool === 'eraser') && currentMousePos) {
       ctx.save(); ctx.beginPath(); ctx.arc(currentMousePos.x, currentMousePos.y, brushSettings.size / 2, 0, Math.PI * 2)
       ctx.strokeStyle = '#888'; ctx.fillStyle = activeTool === 'eraser' ? 'rgba(255,255,255,0.3)' : brushSettings.color + '33'
       ctx.lineWidth = 1 / zoom; ctx.fill(); ctx.stroke(); ctx.restore()
@@ -223,6 +228,7 @@ export function Canvas() {
     ctx.restore()
   }
 
+  // Render yardımcı fonksiyonları (değişmedi)
   const renderPath = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as PathData; if (data.points.length < 2) return; ctx.globalAlpha = data.opacity; ctx.strokeStyle = data.strokeColor; ctx.lineWidth = data.strokeWidth; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(data.points[0].x, data.points[0].y); for (let i = 1; i < data.points.length; i++) ctx.lineTo(data.points[i].x, data.points[i].y); ctx.stroke() }
   const renderShape = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as ShapeData; ctx.globalAlpha = data.opacity; ctx.setLineDash([]); let lineWidth = data.strokeWidth; if (data.borderType === 'dashed') ctx.setLineDash([10, 10]); if (data.borderType === 'dotted') ctx.setLineDash([3, 5]); if (data.borderType === 'bold') lineWidth = data.strokeWidth * 2; if (data.borderType === 'none') lineWidth = 0; ctx.lineWidth = lineWidth; ctx.strokeStyle = data.strokeColor; ctx.fillStyle = data.fillColor; ctx.beginPath(); const w = data.width, h = data.height; switch (data.shapeType) { case "rectangle": ctx.rect(0, 0, w, h); break; case "rounded_rectangle": ctx.roundRect(0, 0, w, h, Math.min(w, h) * 0.2); break; case "ellipse": ctx.ellipse(w / 2, h / 2, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2); break; case "circle": ctx.ellipse(w / 2, h / 2, Math.min(Math.abs(w), Math.abs(h)) / 2, Math.min(Math.abs(w), Math.abs(h)) / 2, 0, 0, Math.PI * 2); break; case "line": ctx.moveTo(0, 0); ctx.lineTo(w, h); break; case "triangle": ctx.moveTo(w / 2, 0); ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); break; case "arrow": { const head = Math.min(Math.abs(w), Math.abs(h)) * 0.3; ctx.moveTo(0, h/3); ctx.lineTo(w-head, h/3); ctx.lineTo(w-head, 0); ctx.lineTo(w, h/2); ctx.lineTo(w-head, h); ctx.lineTo(w-head, h*2/3); ctx.lineTo(0, h*2/3); ctx.closePath(); break; } case "star": { const cx = w/2, cy = h/2, or = Math.min(w, h)/2, ir = or/2.5; for(let i=0; i<10; i++) { const r = i%2===0 ? or : ir; const a = (Math.PI/5)*i - Math.PI/2; i===0 ? ctx.moveTo(cx+Math.cos(a)*r, cy+Math.sin(a)*r) : ctx.lineTo(cx+Math.cos(a)*r, cy+Math.sin(a)*r); } ctx.closePath(); break; } case "cloud": { ctx.moveTo(w*0.2, h*0.5); ctx.bezierCurveTo(w*0.1, h*0.3, w*0.3, h*0.1, w*0.4, h*0.3); ctx.bezierCurveTo(w*0.5, h*0.1, w*0.7, h*0.2, w*0.7, h*0.4); ctx.bezierCurveTo(w*0.9, h*0.3, w, h*0.6, w*0.8, h*0.8); ctx.bezierCurveTo(w*0.9, h, w*0.6, h, w*0.5, h*0.9); ctx.bezierCurveTo(w*0.4, h, w*0.1, h*0.9, w*0.2, h*0.7); ctx.bezierCurveTo(0, h*0.7, 0, h*0.5, w*0.2, h*0.5); ctx.closePath(); break; } case "speech_bubble": { const br = Math.min(w, h)*0.2; ctx.moveTo(br, 0); ctx.lineTo(w-br, 0); ctx.quadraticCurveTo(w, 0, w, br); ctx.lineTo(w, h-br*2); ctx.quadraticCurveTo(w, h-br, w-br, h-br); ctx.lineTo(w/2+br, h-br); ctx.lineTo(w/2, h); ctx.lineTo(w/2-br, h-br); ctx.lineTo(br, h-br); ctx.quadraticCurveTo(0, h-br, 0, h-br*2); ctx.lineTo(0, br); ctx.quadraticCurveTo(0, 0, br, 0); ctx.closePath(); break; } } if (data.fillColor) ctx.fill(); if (data.borderType !== 'none') ctx.stroke() }
   const renderText = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as TextData; ctx.font = `${data.fontSize}px ${data.fontFamily}`; ctx.fillStyle = data.color; ctx.textBaseline = "top"; ctx.textAlign = data.align || "left"; ctx.setLineDash([]); const lines = data.content.split("\n"); const lineHeight = data.fontSize * 1.2; let xOffset = 0; if (data.align === "center") xOffset = data.width / 2; if (data.align === "right") xOffset = data.width; lines.forEach((line, i) => ctx.fillText(line, xOffset, i * lineHeight)) }
@@ -457,21 +463,21 @@ export function Canvas() {
     <div ref={containerRef} className="absolute inset-0 w-full h-full overflow-hidden">
         <canvas 
             ref={canvasRef} 
-            className="block w-full h-full cursor-none" // Force hide system cursor
+            className="block w-full h-full cursor-none" // Sistem imlecini her zaman gizle
             onMouseDown={handleMouseDown} 
             onMouseMove={handleMouseMove} 
             onMouseUp={handleMouseUp} 
             onMouseLeave={handleMouseUp} 
             onDoubleClick={handleDoubleClick} 
-            
+            onWheel={handleWheel} 
         />
         {renderTextEditor()}
         
-        {/* Remote Users Overlay */}
+        {/* Uzak Kullanıcıların İmleçleri (Sadece Online Modda Anlamlıdır) */}
         <CollaborationCursors />
 
-        {/* Local User Custom Cursor Overlay */}
-        {currentMousePos && currentUser && activeTool !== 'brush' && activeTool !== 'eraser' && (
+        {/* YEREL KULLANICI İMLECİ (Her zaman gösterilir) */}
+        {currentMousePos && (
             <div 
                 className="pointer-events-none absolute z-50 transition-transform duration-100 ease-linear"
                 style={{
@@ -481,14 +487,28 @@ export function Canvas() {
                 }}
             >
                <div className="relative">
-                 <MousePointer2 className="size-5 drop-shadow-md" style={{ color: currentUser.color, fill: currentUser.color }} />
-                 {currentUser.isAdmin && (
+                 <MousePointer2 
+                    className="size-5 drop-shadow-md" 
+                    style={{ 
+                        color: cursorColor, // Online: Kullanıcı Rengi, Offline: Gri
+                        fill: cursorColor   
+                    }} 
+                 />
+                 {/* Taç: Sadece Online ve Admin ise */}
+                 {isOnline && currentUser?.isAdmin && (
                    <Crown className="absolute -top-1 -right-1 size-3 drop-shadow-md" style={{ color: "#FFD700", fill: "#FFD700" }} />
                  )}
                </div>
-               <div className="mt-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium text-white shadow-sm" style={{ backgroundColor: currentUser.color }}>
-                 {currentUser.name || "Me"}
-               </div>
+               
+               {/* İsim Etiketi: Sadece Online ise */}
+               {isOnline && currentUser && (
+                   <div 
+                     className="mt-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium text-white shadow-sm" 
+                     style={{ backgroundColor: cursorColor }}
+                   >
+                     {currentUser.name || "Me"}
+                   </div>
+               )}
             </div>
         )}
     </div>
