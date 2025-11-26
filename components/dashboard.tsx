@@ -28,6 +28,7 @@ export function Dashboard() {
   } = useHaloboardStore()
   
   const { t } = useTranslation()
+  const { highlightColor } = useHaloboardStore()
   const [activeTab, setActiveTab] = useState("dashboard")
   const [showSettings, setShowSettings] = useState(false)
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
@@ -67,7 +68,7 @@ export function Dashboard() {
     // Woman with ponytail
     "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiNGOUE4RDQiLz4KPGNpcmNsZSBjeD0iMjAiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNGOUE4RDQiLz4KPGNpcmNsZSBjeD0iMTUiIGN5PSIxNCIgcj0iMS41IiBmaWxsPSIjMDAwIi8+CjxjaXJjbGUgY3g9IjI1IiBjeT0iMTQiIHI9IjEuNSIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTAgMzBMMzAgMzBMMzAgMzZMMTAgMzBaIiBmaWxsPSIjMDAwIi8+CjxwYXRoIGQ9Ik0xMiAzNkwyOCAzNk0xNiAzOEwyNCAzOE0yMCA0MEwyMCA0MFoiIGZpbGw9IiMwMDAiLz4KPHJlY3QgeD0iMjgiIHk9IjE2IiB3aWR0aD0iNCIgaGVpZ2h0PSI4IiBmaWxsPSIjRjY5QjQyIi8+CjxyZWN0IHg9IjE0IiB5PSIyMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMwMDAiLz4KPHJlY3QgeD0iMjgiIHk9IjI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjRjY5QjQyIi8+Cjwvc3ZnPgo=",
     // Man with glasses
-    "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiNGOUI4NTIiLz4KPGNpcmNsZSBjeD0iMjAiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNGOUI4NTIiLz4KPGNpcmNsZSBjeD0iMTUiIGN5PSIxNCIgcj0iMS41IiBmaWxsPSIjMDAwIi8+CjxjaXJjbGUgY3g9IjI1IiBjeT0iMTQiIHI9IjEuNSIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTAgMzBMMzAgMzBMMzAgMzZMMTAgMzBaIiBmaWxsPSIjMDAwIi8+CjxwYXRoIGQ9Ik0xMiAzNkwyOCAzNk0xNiAzOEwyNCAzOE0yMCA0MEwyMCA0MFoiIGZpbGw9IiMwMDAiLz4KPHJlY3QgeD0iMTIiIHk9IjE2IiB3aWR0aD0iNiIgaGVpZ2h0PSIyIiBmaWxsPSIjMDAwIi8+CjxyZWN0IHg9IjIyIiB5PSIxNiIgd2lkdGg9IjYiIGhlaWdodD0iMiIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTAgMTZMMTIgMTZMMTIgMThMMTAgMThaSIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMjggMTZMMzAgMTZMMzAgMThMMjggMThaSIgZmlsbD0iIzAwMCIvPgo8L3N2Zz4K",
+    "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiNGOUI4NTIiLz4KPGNpcmNsZSBjeD0iMjAiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNGOUI4NTIiLz4KPGNpcmNsZSBjeD0iMTUiIGN5PSIxNCIgcj0iMS41IiBmaWxsPSIjMDAwIi8+CjxjaXJjbGUgY3g9IjI1IiBjeT0iMTQiIHI9IjEuNSIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTAgMzBMMzAgMzBMMzAgMzZMMTAgMzBaIiBmaWxsPSIjMDAwIi8+CjxwYXRoIGQ9Ik0xMiAzNkwyOCAzNk0xNiAzOEwyNCAzOE0yMCA0MEwyMCA0MFoiIGZpbGw9IiMwMDAiLz4KPHJlY3QgeD0iMTIiIHk9IjE2IiB3aWR0aD0iNiIgaGVpZ2h0PSIyIiBmaWxsPSIjMDAwIi8+CjxyZWN0IHg9IjIyIiB5PSIxNiIgd2lkdGg9IjYiIGhlaWdodD0iMiIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTAgMTZMMTIgMTZMMTIgMThMMTAgMThaIiBmaWxsPSIjMDAwIi8+CjxwYXRoIGQ9Ik0yOCAxNkwzMCAxNkwzMCAxOEwyOCAxOFoiIGZpbGw9IiMwMDAiLz4KPC9zdmc+Cg==",
     // Teenage girl
     "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiNGOUE4RDQiLz4KPGNpcmNsZSBjeD0iMjAiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNGOUE4RDQiLz4KPGNpcmNsZSBjeD0iMTUiIGN5PSIxNCIgcj0iMS41IiBmaWxsPSIjMDAwIi8+CjxjaXJjbGUgY3g9IjI1IiBjeT0iMTQiIHI9IjEuNSIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTAgMzBMMzAgMzBMMzAgMzZMMTAgMzBaIiBmaWxsPSIjMDAwIi8+CjxwYXRoIGQ9Ik0xMiAzNkwyOCAzNk0xNiAzOEwyNCAzOE0yMCA0MEwyMCA0MFoiIGZpbGw9IiMwMDAiLz4KPHJlY3QgeD0iMTQiIHk9IjIyIiB3aWR0aD0iMTIiIGhlaWdodD0iMiIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTYgMTBMMjQgMTBMMjQgMTJMMTYgMTJaIiBmaWxsPSIjRjk3MUEwIi8+Cjwvc3ZnPgo=",
     // Business woman
@@ -282,8 +283,8 @@ export function Dashboard() {
           <h1 className="text-lg font-semibold text-neutral-800 dark:text-neutral-100">{t("dashboard")}</h1>
           
           <div className="flex items-center gap-3">
-             <Button variant="ghost" size="icon" className="text-neutral-500 hover:text-neutral-700 dark:text-neutral-400">
-                <MoreVertical className="size-5" onClick={() => setShowSettings(true)} />
+             <Button variant="ghost" size="icon" className="text-neutral-500 hover:text-neutral-700 dark:text-neutral-400" onClick={() => setShowSettings(true)}>
+                <MoreVertical className="size-5" />
              </Button>
 
              <div className="relative avatar-container">

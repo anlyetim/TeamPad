@@ -29,30 +29,37 @@ export class CollaborationManager {
   private broadcastChannel: BroadcastChannel | null = null
   private syncInterval: NodeJS.Timeout | null = null
   private messageQueue: BroadcastMessage[] = []
+  private isOnline: boolean;
 
   constructor(projectId: string, userId: string) {
     this.projectId = projectId
     this.userId = userId
+    this.isOnline = false;
 
     if (typeof window !== 'undefined') {
-        // 1. Init BroadcastChannel for Local/Same-PC Sync (Instant)
-        this.broadcastChannel = new BroadcastChannel(`teampad-${projectId}`)
-        this.broadcastChannel.onmessage = (event) => {
-            this.handleMessage(event.data as BroadcastMessage)
-        }
-
-        // Broadcast user join
-        this.broadcastUserJoin()
-
-        // 3. Init periodic sync every 2 seconds
-        this.syncInterval = setInterval(() => {
-            this.requestSync()
-        }, 2000)
-
-        // 2. Init Firebase for Remote Sync (If configured)
+      const { isOnline: sOnline } = useHaloboardStore.getState();
+      this.isOnline = !!sOnline;
+      if (this.isOnline) {
+        // Online mode: Only setup Firebase
         if (db && auth) {
-            this.initFirebase()
+          this.initFirebase();
         }
+        // Broadcast own join event
+        this.broadcastUserJoin();
+        this.syncInterval = setInterval(() => {
+          this.requestSync();
+        }, 2000);
+      } else {
+        // Offline mode: Only BroadcastChannel
+        this.broadcastChannel = new BroadcastChannel(`teampad-${projectId}`);
+        this.broadcastChannel.onmessage = (event) => {
+          this.handleMessage(event.data as BroadcastMessage);
+        };
+        this.broadcastUserJoin();
+        this.syncInterval = setInterval(() => {
+          this.requestSync();
+        }, 2000);
+      }
     }
   }
 
@@ -243,12 +250,12 @@ export class CollaborationManager {
   }
 
   private broadcastMessage(message: BroadcastMessage) {
-    // Send via BroadcastChannel for local communication
-    this.broadcastChannel?.postMessage(message)
-
-    // Queue for Firebase if available
-    if (db && auth?.currentUser) {
-      this.messageQueue.push(message)
+    if (this.isOnline) {
+      if (db && auth?.currentUser) {
+        this.messageQueue.push(message)
+      }
+    } else {
+      this.broadcastChannel?.postMessage(message)
     }
   }
 
@@ -330,7 +337,11 @@ export class CollaborationManager {
 
   public requestSync() {
     const msg: BroadcastMessage = { type: "SYNC_REQUEST", userId: this.userId }
-    this.broadcastChannel?.postMessage(msg)
+    if (this.isOnline) {
+      this.broadcastMessage(msg)
+    } else {
+      this.broadcastChannel?.postMessage(msg)
+    }
   }
 
   public disconnect() {
