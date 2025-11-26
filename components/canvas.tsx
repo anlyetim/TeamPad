@@ -7,6 +7,7 @@ import type { Point, CanvasObject, PathData, ShapeData, TextData, NoteData, Imag
 import { useCollaboration } from "@/lib/collaboration"
 import { useTheme } from "next-themes"
 import { useTranslation } from "@/lib/i18n"
+import { MousePointer2 } from "lucide-react"
 
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -63,10 +64,9 @@ export function Canvas() {
     keybindings,
     currentUserId,
     currentProjectId,
-    users // <-- add selection of users
+    users 
   } = useHaloboardStore()
 
-  // Initialize collaboration with Project ID and User ID
   const collaboration = useCollaboration(currentProjectId, currentUserId)
 
   useEffect(() => {
@@ -86,7 +86,6 @@ export function Canvas() {
     return () => observer.disconnect()
   }, [])
 
-  // Prevent Browser Zoom
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -99,7 +98,6 @@ export function Canvas() {
 
   useEffect(() => { renderCanvas() }, [objects, zoom, panX, panY, selectedIds, layers, showGrid, gridType, highlightColor, interactionMode, currentMousePos, theme, canvasSettings, currentPath, showTransformHandles, editingTextId])
 
-  // --- Helpers (Same as before) ---
   const getObjectSize = (obj: CanvasObject) => {
     switch (obj.type) {
       case "path": const d = obj.data as PathData; if (d.points.length < 2) return { width: 0, height: 0 }; const xs = d.points.map(p=>p.x); const ys = d.points.map(p=>p.y); return { width: Math.max(...xs)-Math.min(...xs), height: Math.max(...ys)-Math.min(...ys) }
@@ -123,7 +121,6 @@ export function Canvas() {
     return { x, y }
   }
   
-  // --- Renderer ---
   const renderCanvas = () => {
     const canvas = canvasRef.current; if (!canvas) return; const ctx = canvas.getContext("2d"); if (!ctx) return
     const logicalWidth = canvas.width / (window.devicePixelRatio || 1); const logicalHeight = canvas.height / (window.devicePixelRatio || 1)
@@ -213,37 +210,16 @@ export function Canvas() {
       ctx.restore()
     }
 
+    // Only draw the "Round Dot" (brush preview) if we are using brush/eraser
     if ((activeTool === 'brush' || activeTool === 'eraser') && currentMousePos) {
       ctx.save(); ctx.beginPath(); ctx.arc(currentMousePos.x, currentMousePos.y, brushSettings.size / 2, 0, Math.PI * 2)
       ctx.strokeStyle = '#888'; ctx.fillStyle = activeTool === 'eraser' ? 'rgba(255,255,255,0.3)' : brushSettings.color + '33'
       ctx.lineWidth = 1 / zoom; ctx.fill(); ctx.stroke(); ctx.restore()
     }
     ctx.restore()
-
-    // Draw all remote and local user cursors
-    users.forEach(user => {
-      if (user.cursor) {
-        const [cursorX, cursorY] = [user.cursor.x, user.cursor.y];
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cursorX, cursorY, 8, 0, 2 * Math.PI, false);
-        ctx.fillStyle = user.color || '#777';
-        ctx.globalAlpha = 0.9;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        // Draw username below cursor
-        ctx.font = '12px sans-serif';
-        ctx.fillStyle = user.color || '#777';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillText(user.name || 'User', cursorX, cursorY + 12);
-        ctx.restore();
-      }
-    });
+    // Loop to draw cursors removed: handled by CollaborationCursors for remote, and custom overlay for local.
   }
 
-  // Render Helpers (Condensed for brevity as they are unchanged logic)
   const renderPath = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as PathData; if (data.points.length < 2) return; ctx.globalAlpha = data.opacity; ctx.strokeStyle = data.strokeColor; ctx.lineWidth = data.strokeWidth; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(data.points[0].x, data.points[0].y); for (let i = 1; i < data.points.length; i++) ctx.lineTo(data.points[i].x, data.points[i].y); ctx.stroke() }
   const renderShape = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as ShapeData; ctx.globalAlpha = data.opacity; ctx.setLineDash([]); let lineWidth = data.strokeWidth; if (data.borderType === 'dashed') ctx.setLineDash([10, 10]); if (data.borderType === 'dotted') ctx.setLineDash([3, 5]); if (data.borderType === 'bold') lineWidth = data.strokeWidth * 2; if (data.borderType === 'none') lineWidth = 0; ctx.lineWidth = lineWidth; ctx.strokeStyle = data.strokeColor; ctx.fillStyle = data.fillColor; ctx.beginPath(); const w = data.width, h = data.height; switch (data.shapeType) { case "rectangle": ctx.rect(0, 0, w, h); break; case "rounded_rectangle": ctx.roundRect(0, 0, w, h, Math.min(w, h) * 0.2); break; case "ellipse": ctx.ellipse(w / 2, h / 2, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2); break; case "circle": ctx.ellipse(w / 2, h / 2, Math.min(Math.abs(w), Math.abs(h)) / 2, Math.min(Math.abs(w), Math.abs(h)) / 2, 0, 0, Math.PI * 2); break; case "line": ctx.moveTo(0, 0); ctx.lineTo(w, h); break; case "triangle": ctx.moveTo(w / 2, 0); ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); break; case "arrow": { const head = Math.min(Math.abs(w), Math.abs(h)) * 0.3; ctx.moveTo(0, h/3); ctx.lineTo(w-head, h/3); ctx.lineTo(w-head, 0); ctx.lineTo(w, h/2); ctx.lineTo(w-head, h); ctx.lineTo(w-head, h*2/3); ctx.lineTo(0, h*2/3); ctx.closePath(); break; } case "star": { const cx = w/2, cy = h/2, or = Math.min(w, h)/2, ir = or/2.5; for(let i=0; i<10; i++) { const r = i%2===0 ? or : ir; const a = (Math.PI/5)*i - Math.PI/2; i===0 ? ctx.moveTo(cx+Math.cos(a)*r, cy+Math.sin(a)*r) : ctx.lineTo(cx+Math.cos(a)*r, cy+Math.sin(a)*r); } ctx.closePath(); break; } case "cloud": { ctx.moveTo(w*0.2, h*0.5); ctx.bezierCurveTo(w*0.1, h*0.3, w*0.3, h*0.1, w*0.4, h*0.3); ctx.bezierCurveTo(w*0.5, h*0.1, w*0.7, h*0.2, w*0.7, h*0.4); ctx.bezierCurveTo(w*0.9, h*0.3, w, h*0.6, w*0.8, h*0.8); ctx.bezierCurveTo(w*0.9, h, w*0.6, h, w*0.5, h*0.9); ctx.bezierCurveTo(w*0.4, h, w*0.1, h*0.9, w*0.2, h*0.7); ctx.bezierCurveTo(0, h*0.7, 0, h*0.5, w*0.2, h*0.5); ctx.closePath(); break; } case "speech_bubble": { const br = Math.min(w, h)*0.2; ctx.moveTo(br, 0); ctx.lineTo(w-br, 0); ctx.quadraticCurveTo(w, 0, w, br); ctx.lineTo(w, h-br*2); ctx.quadraticCurveTo(w, h-br, w-br, h-br); ctx.lineTo(w/2+br, h-br); ctx.lineTo(w/2, h); ctx.lineTo(w/2-br, h-br); ctx.lineTo(br, h-br); ctx.quadraticCurveTo(0, h-br, 0, h-br*2); ctx.lineTo(0, br); ctx.quadraticCurveTo(0, 0, br, 0); ctx.closePath(); break; } } if (data.fillColor) ctx.fill(); if (data.borderType !== 'none') ctx.stroke() }
   const renderText = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as TextData; ctx.font = `${data.fontSize}px ${data.fontFamily}`; ctx.fillStyle = data.color; ctx.textBaseline = "top"; ctx.textAlign = data.align || "left"; ctx.setLineDash([]); const lines = data.content.split("\n"); const lineHeight = data.fontSize * 1.2; let xOffset = 0; if (data.align === "center") xOffset = data.width / 2; if (data.align === "right") xOffset = data.width; lines.forEach((line, i) => ctx.fillText(line, xOffset, i * lineHeight)) }
@@ -277,17 +253,14 @@ export function Canvas() {
     const anchor = getAnchorOffset(obj, width, height)
     const handleSize = 8 / zoom
 
-    // Transform point to object local coordinates
     const localX = (point.x - obj.transform.x) / obj.transform.scaleX + anchor.x
     const localY = (point.y - obj.transform.y) / obj.transform.scaleY + anchor.y
 
-    // Rotate point to account for object rotation
     const cos = Math.cos(-obj.transform.rotation * Math.PI / 180)
     const sin = Math.sin(-obj.transform.rotation * Math.PI / 180)
     const rotatedX = localX * cos - localY * sin
     const rotatedY = localX * sin + localY * cos
 
-    // Check rotation handle
     const rotHandleY = -30 / obj.transform.scaleY / zoom
     const rotHandleX = width / 2
     const rotDist = Math.sqrt((rotatedX - rotHandleX) ** 2 + (rotatedY - rotHandleY) ** 2)
@@ -295,7 +268,6 @@ export function Canvas() {
       return "rotate"
     }
 
-    // Check corner handles
     const hSizeX = handleSize / obj.transform.scaleX
     const hSizeY = handleSize / obj.transform.scaleY
     const corners = [
@@ -384,7 +356,6 @@ export function Canvas() {
         interactionModeRef.current = 'rotating'
         setInteractionMode('rotating')
       } else if (typeof clickType === "string" && clickType.length === 2) {
-        // Corner handle clicked
         setSelectedIds([clickedObject.id])
         initialObjectStateRef.current = clickedObject
         activeHandleRef.current = clickType
@@ -464,7 +435,6 @@ export function Canvas() {
     if (clickedObject && (clickedObject.type === "text" || clickedObject.type === "note")) { setEditingTextId(clickedObject.id); const data = clickedObject.data as (TextData | NoteData); const isPlaceholder = (clickedObject.type === 'text' && (data.content === t("clickToEdit") || data.content === "Click to edit")) || (clickedObject.type === 'note' && (data.content === t("newNote") || data.content === "New note")); setEditText(isPlaceholder ? "" : data.content) } 
   }
   const handleTextBlur = () => { if (editingTextId) { const obj = objects.find(o => o.id === editingTextId); if (obj) { const newData = { ...obj.data, content: editText }; updateObject(obj.id, { data: newData as any }) } setEditingTextId(null) } }
-  const handleWheel = (e: React.WheelEvent) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); const delta = e.deltaY > 0 ? 0.9 : 1.1; setZoom(zoom * delta) } else { setPan(panX - e.deltaX, panY - e.deltaY) } }
   
   useEffect(() => { const handleMouseEvent = (e: MouseEvent) => { (window as any).lastMouseEvent = e }; window.addEventListener("mousemove", handleMouseEvent); return () => window.removeEventListener("mousemove", handleMouseEvent) }, [])
   useEffect(() => { const handleKeyDown = (e: KeyboardEvent) => { const tagName = (e.target as HTMLElement).tagName; if (tagName === 'INPUT' || tagName === 'TEXTAREA') return; const key = e.key.toLowerCase(); if (!e.metaKey && !e.ctrlKey) { if (key === keybindings.select) setActiveTool('select'); else if (key === keybindings.brush) setActiveTool('brush'); else if (key === keybindings.eraser) setActiveTool('eraser'); else if (key === keybindings.image) setActiveTool('image'); else if (key === keybindings.shape) setActiveTool('shape'); else if (key === keybindings.note) setActiveTool('note'); else if (key === keybindings.text) setActiveTool('text'); } if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) { e.preventDefault(); useHaloboardStore.getState().undo() } if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) { e.preventDefault(); useHaloboardStore.getState().redo() } if (e.key === "Delete" || e.key === "Backspace") { const { selectedIds, deleteObject } = useHaloboardStore.getState(); selectedIds.forEach((id) => deleteObject(id)) } if ((e.ctrlKey || e.metaKey) && e.key === 'c') { useHaloboardStore.getState().copy() } if ((e.ctrlKey || e.metaKey) && e.key === 'v') { useHaloboardStore.getState().paste() } if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); useHaloboardStore.getState().duplicate() } }; window.addEventListener("keydown", handleKeyDown); return () => window.removeEventListener("keydown", handleKeyDown) }, [keybindings])
@@ -480,5 +450,33 @@ export function Canvas() {
     return ( <textarea ref={textAreaRef} value={editText} onChange={(e) => setEditText(e.target.value)} onBlur={handleTextBlur} style={style} autoFocus onKeyDown={(e) => { if (e.key === "Escape") { handleTextBlur(); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleTextBlur(); } }} /> )
   }
 
-  return <div ref={containerRef} className="absolute inset-0 w-full h-full overflow-hidden"><canvas ref={canvasRef} className="block w-full h-full cursor-crosshair" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDoubleClick={handleDoubleClick} onWheel={handleWheel} />{renderTextEditor()}</div>
+  return (
+    <div ref={containerRef} className="absolute inset-0 w-full h-full overflow-hidden">
+        <canvas 
+            ref={canvasRef} 
+            className="block w-full h-full cursor-none" // Force hide system cursor
+            onMouseDown={handleMouseDown} 
+            onMouseMove={handleMouseMove} 
+            onMouseUp={handleMouseUp} 
+            onMouseLeave={handleMouseUp} 
+            onDoubleClick={handleDoubleClick} 
+            // Removed onWheel={handleWheel} because handleWheel is not defined
+        />
+        {renderTextEditor()}
+        
+        {/* Local User Cursor Overlay */}
+        {currentMousePos && activeTool !== 'brush' && activeTool !== 'eraser' && (
+            <div 
+                className="pointer-events-none absolute z-50"
+                style={{
+                    left: `${currentMousePos.x * zoom + panX}px`,
+                    top: `${currentMousePos.y * zoom + panY}px`,
+                    transform: "translate(-2px, -2px)", 
+                }}
+            >
+               <MousePointer2 className="size-5 fill-black text-white drop-shadow-sm" />
+            </div>
+        )}
+    </div>
+  )
 }
