@@ -126,13 +126,22 @@ export class CollaborationManager {
         if (message.userId === this.userId) {
           // Current user is being kicked - leave the project
           const currentProjectId = useHaloboardStore.getState().currentProjectId
-          store.setActiveView("dashboard")
-          useHaloboardStore.setState({ currentProjectId: null })
+          const setStore = useHaloboardStore.setState
           if (currentProjectId) {
-            store.deleteProject(currentProjectId)
+            // Add to kickedProjectIds
+            setStore((state) => ({
+                kickedProjectIds: [...(state.kickedProjectIds || []), currentProjectId],
+                projects: state.projects.filter(p => p.id !== currentProjectId)
+            }))
+          }
+          // Always update view/detach
+          useHaloboardStore.setState({ activeView: "dashboard", currentProjectId: null })
+          if (currentProjectId) {
+            const store = useHaloboardStore.getState()
+            store.deleteProject(currentProjectId) // just in case
           }
           // Clear project state
-          store.resetProject()
+          useHaloboardStore.getState().resetProject()
           // Disconnect collaboration
           this.disconnect()
         } else {

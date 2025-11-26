@@ -157,6 +157,7 @@ interface HaloboardState {
   toggleChat: () => void
   maxUsers: number; // Add this line
   setMaxUsers: (n: number) => void; // Add this line
+  kickedProjectIds?: string[]; // add this line
 }
 
 const initialUserId = `user-${Math.random().toString(36).substr(2, 9)}`
@@ -183,6 +184,12 @@ export const useHaloboardStore = create<HaloboardState>()(
       removeNotification: (id) => set(state => ({ notifications: state.notifications.filter(n => n.id !== id) })),
 
       joinProject: (code, nickname) => {
+        // Prevent rejoining kicked project
+        if (get().kickedProjectIds && get().kickedProjectIds.includes(code)) {
+          get().addNotification("You have been removed from this project.");
+          set({ activeView: "dashboard", currentProjectId: null });
+          return; 
+        }
         // Prevent exceeding max users
         if (get().users.length >= get().maxUsers) {
           get().addNotification("The project is currently at maximum user capacity.")
@@ -645,6 +652,18 @@ export const useHaloboardStore = create<HaloboardState>()(
           if (isKick) {
               const manager = getCollaborationManager()
               if (manager) manager.broadcastKick(id)
+              // Mark project as kicked for the removed user locally if it's the current user
+              const currentUserId = get().currentUserId
+              const currentProjectId = get().currentProjectId
+              if (id === currentUserId && currentProjectId) {
+                set((state) => ({
+                  kickedProjectIds: [...(state.kickedProjectIds || []), currentProjectId],
+                  // remove the project from the local projects array
+                  projects: state.projects.filter(p => p.id !== currentProjectId)
+                }))
+                set({ activeView: "dashboard", currentProjectId: null })
+                get().addNotification("You have been removed from this project.")
+              }
           }
       },
 
@@ -655,6 +674,7 @@ export const useHaloboardStore = create<HaloboardState>()(
       toggleChat: () => set((state) => ({ showChat: !state.showChat })),
       maxUsers: 4,
       setMaxUsers: (n) => set({ maxUsers: Math.max(2, Math.min(6, n)) }),
+      kickedProjectIds: [],
     }),
     {
       name: 'haloboard-storage',
@@ -672,7 +692,8 @@ export const useHaloboardStore = create<HaloboardState>()(
         currentProjectId: state.currentProjectId,
         isProjectMinimized: state.isProjectMinimized,
         activeView: state.activeView,
-        currentUserId: state.currentUserId
+        currentUserId: state.currentUserId,
+        kickedProjectIds: state.kickedProjectIds
       }),
     }
   )
