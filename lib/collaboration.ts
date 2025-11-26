@@ -1,45 +1,17 @@
 import type { CanvasObject, Point, BroadcastMessage, User, ChatMessage, Layer, HistoryStep } from "./types"
 import { useHaloboardStore } from "./store"
-import { initializeApp, getApps, getApp } from "firebase/app"
-import { getFirestore, doc, onSnapshot, updateDoc, setDoc, type DocumentSnapshot, getDoc } from "firebase/firestore"
-import { getAuth, signInAnonymously } from "firebase/auth"
+import { doc, onSnapshot, updateDoc, setDoc, type DocumentSnapshot, getDoc } from "firebase/firestore"
+import { signInAnonymously } from "firebase/auth"
+import { db, auth } from "./firebaseConfig" // Yeni config dosyasından import ediyoruz
 
-// Initialize Firebase - Handle missing config gracefully
-const firebaseConfigString = typeof window !== 'undefined' ? (window as any).__firebase_config : null;
-const firebaseConfig = firebaseConfigString ? JSON.parse(firebaseConfigString) : null;
-
-let db: any;
-let auth: any;
-
-// Helper to initialize DB on demand if needed
-const ensureDbInitialized = () => {
-    if (db) return db;
-    if (typeof window !== 'undefined' && firebaseConfig && firebaseConfig.apiKey) {
-        try {
-            const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
-            return db;
-        } catch (e) {
-            console.warn("Firebase initialization failed:", e);
-            return null;
-        }
-    }
-    return null;
-};
-
-// Ensure DB is initialized at module load if possible
-ensureDbInitialized();
-
-// Helper to validate project existence before joining
+// Projenin var olup olmadığını kontrol eden yardımcı fonksiyon
 export async function checkProjectExists(projectId: string): Promise<boolean> {
-    const database = ensureDbInitialized();
-    if (!database || !projectId) {
-        console.warn("Database or Project ID missing during check.");
+    if (!db || !projectId) {
+        console.warn("Database connection not available or Project ID missing.");
         return false;
     }
     try {
-        const docRef = doc(database, "projects", projectId);
+        const docRef = doc(db, "projects", projectId);
         const docSnap = await getDoc(docRef);
         return docSnap.exists();
     } catch (e) {
@@ -68,19 +40,21 @@ export class CollaborationManager {
     if (typeof window !== 'undefined') {
       const { isOnline: sOnline } = useHaloboardStore.getState();
       this.isOnline = !!sOnline;
+      
       if (this.isOnline) {
-        // Online mode: Only setup Firebase
-        ensureDbInitialized();
+        // Online mod: Firebase kullan
         if (db && auth) {
           this.initFirebase();
+        } else {
+            console.error("Firebase not initialized properly check firebaseConfig.ts");
         }
-        // Broadcast own join event
+        // Katılım olayını yayınla
         this.broadcastUserJoin();
         this.syncInterval = setInterval(() => {
           this.requestSync();
         }, 5000); 
       } else {
-        // Offline mode: Only BroadcastChannel
+        // Offline mod: Sadece BroadcastChannel
         this.broadcastChannel = new BroadcastChannel(`teampad-${projectId}`);
         this.broadcastChannel.onmessage = (event) => {
           this.handleMessage(event.data as BroadcastMessage);
@@ -94,7 +68,7 @@ export class CollaborationManager {
   }
 
   private handleMessage(message: BroadcastMessage) {
-    // Don't process own messages
+    // Kendi mesajlarımızı işleme
     if ('userId' in message && message.userId === this.userId) return
     if (message.type === 'USER_JOIN' && message.user.id === this.userId) return
 
@@ -133,9 +107,9 @@ export class CollaborationManager {
         break
       case "USER_JOIN":
         store.addUser(message.user)
-        // Broadcast our own user info back to the newly joined user
         this.broadcastUserJoin()
-        // Ensure our own user object has a cursor
+        
+        // Yeni gelen kullanıcının bizi görebilmesi için konumumuzu gönderelim
         const boardState = useHaloboardStore.getState()
         const hostUser = boardState.users.find(u => u.id === this.userId)
         if (hostUser && hostUser.cursor) {
@@ -147,36 +121,28 @@ export class CollaborationManager {
         break
       case "USER_KICK":
         if (message.userId === this.userId) {
-          // Current user is being kicked - leave the project
           const currentProjectId = useHaloboardStore.getState().currentProjectId
           const setStore = useHaloboardStore.setState
           if (currentProjectId) {
-            // Add to kickedProjectIds
             setStore((state) => ({
                 kickedProjectIds: [...(state.kickedProjectIds || []), currentProjectId],
                 projects: state.projects.filter(p => p.id !== currentProjectId)
             }))
           }
-          // Always update view/detach
           useHaloboardStore.setState({ activeView: "dashboard", currentProjectId: null })
           if (currentProjectId) {
             const store = useHaloboardStore.getState()
-            store.deleteProject(currentProjectId) // just in case
+            store.deleteProject(currentProjectId)
           }
-          // Clear project state
           useHaloboardStore.getState().resetProject()
-          // Disconnect collaboration
           this.disconnect()
         } else {
-          // Remove the kicked user from our user list
           store.removeUser(message.userId)
         }
         break
       case "SYNC_REQUEST":
-        // Send current objects and layers to the requesting user
         if (message.userId !== this.userId) {
           const { objects, layers } = useHaloboardStore.getState()
-          // Only sync if we have objects to share
           if (objects.length > 0) {
               const { users, history } = useHaloboardStore.getState()
               const response: BroadcastMessage = {
@@ -192,17 +158,14 @@ export class CollaborationManager {
         }
         break;
       case "SYNC_RESPONSE":
-        // Update local state with synced objects and layers
         if (message.userId !== this.userId) {
           const store = useHaloboardStore.getState()
-          // Sync if we are empty OR if they have more objects (simple conflict resolution)
           if (store.objects.length === 0 && message.objects.length > 0) {
             store.loadProject({ objects: message.objects, layers: message.layers })
           } else if (message.objects.length > store.objects.length) {
             store.loadProject({ objects: message.objects, layers: message.layers })
           }
           
-          // Update users list
           if (message.users) {
             message.users.forEach(user => {
               if (!store.users.find(u => u.id === user.id)) {
@@ -210,7 +173,6 @@ export class CollaborationManager {
               }
             })
           }
-          // Sync history
           if (message.history && message.history.length > store.history.length) {
             store.loadProject({ history: message.history, historyIndex: message.history.length - 1 })
           }
@@ -228,10 +190,9 @@ export class CollaborationManager {
 
      const projectRef = doc(db, "projects", this.projectId);
 
-     // FIX: Ensure the project is created in the database immediately if we are the owner.
+     // Eğer projeyi oluşturan kişiysek (Owner), veritabanında kaydın oluştuğundan emin olalım.
      if (useHaloboardStore.getState().isOwner) {
          const { objects, layers, canvasSettings } = useHaloboardStore.getState();
-         // Use setDoc with merge: true to safely initialize or update
          await setDoc(projectRef, {
              objects: objects || [],
              layers: layers || [],
@@ -240,14 +201,13 @@ export class CollaborationManager {
          }, { merge: true });
      }
 
-     // Attempt initial fetch to sync state
+     // İlk bağlantıda mevcut veriyi çekmeyi dene
      try {
         const docSnap = await getDoc(projectRef);
         if (docSnap.exists()) {
             const data = docSnap.data();
             const store = useHaloboardStore.getState();
             if (data.objects && Array.isArray(data.objects)) {
-                // Only overwrite if we are fresh (empty)
                 if (store.objects.length === 0) {
                     store.loadProject({
                         objects: data.objects,
@@ -261,14 +221,13 @@ export class CollaborationManager {
          console.error("Failed to fetch initial project state:", e);
      }
 
-     // Listen for real-time updates
+     // Gerçek zamanlı güncellemeleri dinle
      this.unsubscribe = onSnapshot(projectRef, (docSnapshot: DocumentSnapshot) => {
          if (!docSnapshot.exists()) return;
 
          const data = docSnapshot.data();
          if (!data) return;
 
-         // Redundant check: if we missed the initial load
          if (!this.initialLoadDone && data.objects && data.objects.length > 0) {
              const store = useHaloboardStore.getState();
              if (store.objects.length === 0) {
@@ -277,10 +236,9 @@ export class CollaborationManager {
              }
          }
 
-         // Process remote messages from Firebase
          if (data.messages && Array.isArray(data.messages)) {
              data.messages.forEach((msg: any) => {
-                 // Extended timeout to 30s to account for clock skew
+                 // 30 saniye tolerans
                  if (msg.userId !== this.userId && msg.timestamp > Date.now() - 30000) { 
                      this.handleMessage(msg as BroadcastMessage);
                  }
@@ -288,7 +246,7 @@ export class CollaborationManager {
          }
      });
 
-     // Set up periodic sending of messages to Firebase
+     // Mesaj kuyruğunu periyodik olarak gönder
      setInterval(async () => {
          if (this.messageQueue.length > 0) {
              const messages = [...this.messageQueue];
@@ -315,7 +273,6 @@ export class CollaborationManager {
   public saveProject(state: any) {
     if (!this.isOnline || !db || !auth?.currentUser) return;
 
-    // Debounce saves
     if (this.saveTimeout) clearTimeout(this.saveTimeout);
 
     this.saveTimeout = setTimeout(async () => {
@@ -351,7 +308,6 @@ export class CollaborationManager {
     const me = users.find(u => u.id === currentUserId)
     if (!me) return
 
-    // Update our own cursor position locally
     useHaloboardStore.getState().updateUserCursor(this.userId, position, me.name, me.color)
 
     const msg: BroadcastMessage = {
