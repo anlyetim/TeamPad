@@ -1,7 +1,7 @@
 import type { CanvasObject, Point, BroadcastMessage, User, ChatMessage, Layer, HistoryStep } from "./types"
 import { useHaloboardStore } from "./store"
 import { initializeApp, getApps, getApp } from "firebase/app"
-import { getFirestore, doc, onSnapshot, type DocumentSnapshot } from "firebase/firestore"
+import { getFirestore, doc, onSnapshot, updateDoc, type DocumentSnapshot } from "firebase/firestore"
 import { getAuth, signInAnonymously } from "firebase/auth"
 
 // Initialize Firebase - Handle missing config gracefully
@@ -28,6 +28,7 @@ export class CollaborationManager {
   private lastCursorBroadcast = 0
   private broadcastChannel: BroadcastChannel | null = null
   private syncInterval: NodeJS.Timeout | null = null
+  private messageQueue: BroadcastMessage[] = []
 
   constructor(projectId: string, userId: string) {
     this.projectId = projectId
@@ -139,7 +140,7 @@ export class CollaborationManager {
             users,
             history
           }
-          this.broadcastChannel?.postMessage(response)
+          this.broadcastMessage(response)
         }
         break;
       case "SYNC_RESPONSE":
@@ -168,17 +169,65 @@ export class CollaborationManager {
   }
 
   private async initFirebase() {
-     if (!auth) return;
-     
+     if (!auth || !db) return;
+
      if (!auth.currentUser) {
          try { await signInAnonymously(auth); } catch (e) { console.error("Auth failed", e); return; }
      }
-     
-     // Simple document listener
+
+     // Listen for real-time updates from Firebase
      const projectRef = doc(db, "projects", this.projectId);
      this.unsubscribe = onSnapshot(projectRef, (docSnapshot: DocumentSnapshot) => {
-         // Real sync logic would go here
+         if (!docSnapshot.exists()) return;
+
+         const data = docSnapshot.data();
+         if (!data) return;
+
+         // Process remote messages from Firebase
+         if (data.messages && Array.isArray(data.messages)) {
+             data.messages.forEach((msg: any) => {
+                 // Only process messages that aren't from us and haven't been processed
+                 if (msg.userId !== this.userId && msg.timestamp > Date.now() - 5000) { // Within last 5 seconds
+                     this.handleMessage(msg as BroadcastMessage);
+                 }
+             });
+         }
      });
+
+     // Set up periodic sending of messages to Firebase
+     setInterval(async () => {
+         if (this.messageQueue.length > 0) {
+             const messages = [...this.messageQueue];
+             this.messageQueue = [];
+
+             try {
+                 // Add timestamp to messages for filtering
+                 const messagesWithTimestamp = messages.map(msg => ({
+                     ...msg,
+                     timestamp: Date.now()
+                 }));
+
+                 await updateDoc(projectRef, {
+                     messages: messagesWithTimestamp,
+                     lastUpdated: Date.now()
+                 });
+             } catch (error) {
+                 console.error("Failed to send messages to Firebase:", error);
+                 // Put messages back in queue
+                 this.messageQueue.unshift(...messages);
+             }
+         }
+     }, 100); // Send every 100ms
+  }
+
+  private broadcastMessage(message: BroadcastMessage) {
+    // Send via BroadcastChannel for local communication
+    this.broadcastChannel?.postMessage(message)
+
+    // Queue for Firebase if available
+    if (db && auth?.currentUser) {
+      this.messageQueue.push(message)
+    }
   }
 
   public broadcastCursor(position: Point) {
@@ -201,47 +250,47 @@ export class CollaborationManager {
         position
     }
 
-    this.broadcastChannel?.postMessage(msg)
+    this.broadcastMessage(msg)
   }
 
   public broadcastObject(object: CanvasObject) {
      const msg: BroadcastMessage = { type: "OBJECT_UPDATE", object }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastDelete(objectId: string) {
      const msg: BroadcastMessage = { type: "OBJECT_DELETE", objectId }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastLayer(layer: Layer) {
      const msg: BroadcastMessage = { type: "LAYER_UPDATE", layer }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastLayerDelete(layerId: string) {
      const msg: BroadcastMessage = { type: "LAYER_DELETE", layerId }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastHistory(historyStep: HistoryStep) {
      const msg: BroadcastMessage = { type: "HISTORY_UPDATE", historyStep }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastHistoryNavigation(action: "undo" | "redo" | "setIndex", index?: number) {
      const msg: BroadcastMessage = { type: "HISTORY_NAVIGATION", action, index }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastKick(userId: string) {
      const msg: BroadcastMessage = { type: "USER_KICK", userId }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastChat(message: ChatMessage) {
      const msg: BroadcastMessage = { type: "CHAT_MESSAGE", message }
-     this.broadcastChannel?.postMessage(msg)
+     this.broadcastMessage(msg)
   }
 
   public broadcastUserJoin() {
@@ -254,7 +303,7 @@ export class CollaborationManager {
       user: me
     }
 
-    this.broadcastChannel?.postMessage(msg)
+    this.broadcastMessage(msg)
   }
 
   public requestSync() {
