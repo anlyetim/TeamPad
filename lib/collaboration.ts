@@ -30,6 +30,8 @@ export class CollaborationManager {
   private syncInterval: NodeJS.Timeout | null = null
   private messageQueue: BroadcastMessage[] = []
   private isOnline: boolean;
+  private saveTimeout: NodeJS.Timeout | null = null;
+  private initialLoadDone = false;
 
   constructor(projectId: string, userId: string) {
     this.projectId = projectId
@@ -48,7 +50,7 @@ export class CollaborationManager {
         this.broadcastUserJoin();
         this.syncInterval = setInterval(() => {
           this.requestSync();
-        }, 2000);
+        }, 5000); // Relaxed interval
       } else {
         // Offline mode: Only BroadcastChannel
         this.broadcastChannel = new BroadcastChannel(`teampad-${projectId}`);
@@ -212,11 +214,24 @@ export class CollaborationManager {
          const data = docSnapshot.data();
          if (!data) return;
 
+         // FIX: Load initial state from the document itself, not just messages
+         // If we are fresh (0 objects) or just connected, pull the database state
+         const store = useHaloboardStore.getState();
+         if (!this.initialLoadDone && (data.objects || data.layers)) {
+             console.log("Loading initial project state from Firestore");
+             store.loadProject({
+                 objects: data.objects || [],
+                 layers: data.layers || [],
+                 // canvasSettings: data.canvasSettings // (Optional)
+             });
+             this.initialLoadDone = true;
+         }
+
          // Process remote messages from Firebase
          if (data.messages && Array.isArray(data.messages)) {
              data.messages.forEach((msg: any) => {
-                 // Only process messages that aren't from us and haven't been processed
-                 if (msg.userId !== this.userId && msg.timestamp > Date.now() - 5000) { // Within last 5 seconds
+                 // Relaxed timestamp check: 30 seconds instead of 5 to account for clock skew
+                 if (msg.userId !== this.userId && msg.timestamp > Date.now() - 30000) { 
                      this.handleMessage(msg as BroadcastMessage);
                  }
              });
@@ -247,6 +262,26 @@ export class CollaborationManager {
              }
          }
      }, 100); // Send every 100ms
+  }
+
+  public saveProject(state: any) {
+    if (!this.isOnline || !db || !auth?.currentUser) return;
+
+    // Debounce saves to avoid write limits
+    if (this.saveTimeout) clearTimeout(this.saveTimeout);
+
+    this.saveTimeout = setTimeout(async () => {
+        const projectRef = doc(db, "projects", this.projectId);
+        try {
+            await updateDoc(projectRef, {
+                objects: state.objects,
+                layers: state.layers,
+                lastUpdated: Date.now()
+            });
+        } catch (e) {
+            console.error("Failed to save project state to Cloud:", e);
+        }
+    }, 2000); // Save after 2 seconds of inactivity
   }
 
   private broadcastMessage(message: BroadcastMessage) {
@@ -351,6 +386,7 @@ export class CollaborationManager {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
     }
+    if (this.saveTimeout) clearTimeout(this.saveTimeout);
   }
 }
 

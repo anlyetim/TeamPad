@@ -155,9 +155,9 @@ interface HaloboardState {
   setIsPanning: (isPanning: boolean) => void
   togglePropertiesPanel: () => void
   toggleChat: () => void
-  maxUsers: number; // Add this line
-  setMaxUsers: (n: number) => void; // Add this line
-  kickedProjectIds?: string[]; // add this line
+  maxUsers: number; 
+  setMaxUsers: (n: number) => void;
+  kickedProjectIds?: string[];
 }
 
 const initialUserId = `user-${Math.random().toString(36).substr(2, 9)}`
@@ -169,8 +169,8 @@ export const useHaloboardStore = create<HaloboardState>()(
       setActiveView: (view) => set({ activeView: view, isProjectMinimized: view === "dashboard" }),
       isProjectMinimized: true,
       setIsProjectMinimized: (minimized) => set({ isProjectMinimized: minimized, activeView: minimized ? "dashboard" : "canvas" }),
-      isOwner: true, // Default to owner for single player/new projects
-      isOnline: false, // Default to offline
+      isOwner: true, 
+      isOnline: false,
 
       projects: [],
       currentProjectId: null,
@@ -184,29 +184,27 @@ export const useHaloboardStore = create<HaloboardState>()(
       removeNotification: (id) => set(state => ({ notifications: state.notifications.filter(n => n.id !== id) })),
 
       joinProject: (code, nickname) => {
-        // Prevent rejoining kicked project
-        if (get().kickedProjectIds && get().kickedProjectIds.includes(code)) {
+        const kickedProjectIds = get().kickedProjectIds ?? [];
+        if (kickedProjectIds.includes(code)) {
           get().addNotification("You have been removed from this project.");
           set({ activeView: "dashboard", currentProjectId: null });
           return; 
         }
-        // Prevent exceeding max users
         if (get().users.length >= get().maxUsers) {
           get().addNotification("The project is currently at maximum user capacity.")
           return
         }
         const newId = code
         const myColor = generateColor()
-        // Reset state but keep keybindings/theme
         set(state => ({
           currentUserId: initialUserId,
           users: [{ id: initialUserId, name: nickname, color: myColor, avatar: "/placeholder-user.jpg", lastActive: Date.now(), isAdmin: false }],
           currentProjectId: newId,
           activeView: "canvas",
           isProjectMinimized: false,
-          isOwner: false, // Joining users are not owners
-          isOnline: true, // Joined projects are online
-          objects: [], // Clear existing objects, wait for sync
+          isOwner: false,
+          isOnline: true,
+          objects: [],
           layers: [{ id: "layer-1", name: "Layer 1", opacity: 1, blendMode: "normal", visible: true, locked: false, objectIds: [] }],
           chatMessages: []
         }))
@@ -246,7 +244,7 @@ export const useHaloboardStore = create<HaloboardState>()(
             historyIndex: 0,
             activeView: "canvas",
             isProjectMinimized: false,
-            isOwner: true // Loading own project means owner
+            isOwner: true
           })
         }
       },
@@ -258,7 +256,7 @@ export const useHaloboardStore = create<HaloboardState>()(
           currentProjectId: newId,
           activeView: "canvas",
           isProjectMinimized: false,
-          isOwner: true, // Creating new project means owner
+          isOwner: true, 
           isOnline: isOnline,
           canvasSettings: settings,
           objects: [],
@@ -393,7 +391,10 @@ export const useHaloboardStore = create<HaloboardState>()(
         
         if (!isRemote) {
             const manager = getCollaborationManager()
-            if (manager) manager.broadcastObject(object)
+            if (manager) {
+              manager.broadcastObject(object)
+              manager.saveProject(get()) // Fix: Save state to cloud
+            }
         }
       },
 
@@ -411,7 +412,10 @@ export const useHaloboardStore = create<HaloboardState>()(
            const updatedObj = state.objects.find(o => o.id === id)
            if (updatedObj) {
                const manager = getCollaborationManager()
-               if (manager) manager.broadcastObject(updatedObj)
+               if (manager) {
+                 manager.broadcastObject(updatedObj)
+                 manager.saveProject(state) // Fix: Save state to cloud
+               }
            }
         }
       },
@@ -429,7 +433,10 @@ export const useHaloboardStore = create<HaloboardState>()(
 
         if (!isRemote) {
             const manager = getCollaborationManager()
-            if (manager) manager.broadcastDelete(id)
+            if (manager) {
+              manager.broadcastDelete(id)
+              manager.saveProject(get()) // Fix: Save state to cloud
+            }
         }
       },
 
@@ -452,6 +459,7 @@ export const useHaloboardStore = create<HaloboardState>()(
             const manager = getCollaborationManager()
             if (manager) {
                 manager.broadcastLayer(newLayer)
+                manager.saveProject(get()) // Fix: Save state to cloud
             }
         }
       },
@@ -467,7 +475,10 @@ export const useHaloboardStore = create<HaloboardState>()(
             const manager = getCollaborationManager()
             if (manager) {
                 const updatedLayer = get().layers.find(l => l.id === id)
-                if (updatedLayer) manager.broadcastLayer(updatedLayer)
+                if (updatedLayer) {
+                  manager.broadcastLayer(updatedLayer)
+                  manager.saveProject(get()) // Fix: Save state to cloud
+                }
             }
         }
       },
@@ -487,7 +498,10 @@ export const useHaloboardStore = create<HaloboardState>()(
 
         if (!isRemote) {
             const manager = getCollaborationManager()
-            if (manager) manager.broadcastLayerDelete(id)
+            if (manager) {
+              manager.broadcastLayerDelete(id)
+              manager.saveProject(get()) // Fix: Save state to cloud
+            }
         }
       },
 
@@ -500,6 +514,10 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { layers: newLayers }
         })
         get().saveCurrentProject()
+        
+        // Save move
+        const manager = getCollaborationManager()
+        if (manager && get().isOnline) manager.saveProject(get())
       },
 
       reorderLayer: (fromIndex, toIndex) => {
@@ -510,6 +528,10 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { layers: newLayers }
         })
         get().saveCurrentProject()
+
+        // Save reorder
+        const manager = getCollaborationManager()
+        if (manager && get().isOnline) manager.saveProject(get())
       },
 
       moveObjectToLayer: (objectId, targetLayerId) => {
@@ -524,6 +546,10 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { layers: newLayers, objects: newObjects }
         })
         get().saveCurrentProject()
+
+        // Save move
+        const manager = getCollaborationManager()
+        if (manager && get().isOnline) manager.saveProject(get())
       },
 
       reorderObject: (objectId, direction) => {
@@ -541,6 +567,10 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { layers: newLayers }
         })
         get().saveCurrentProject()
+
+        // Save reorder
+        const manager = getCollaborationManager()
+        if (manager && get().isOnline) manager.saveProject(get())
       },
 
       reorderObjectInLayer: (objectId, targetLayerId, newIndex) => {
@@ -564,6 +594,10 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { layers: newLayers, objects: newObjects }
         })
         get().saveCurrentProject()
+
+        // Save reorder
+        const manager = getCollaborationManager()
+        if (manager && get().isOnline) manager.saveProject(get())
       },
 
       copy: () => set((state) => {
@@ -593,6 +627,10 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { objects: finalObjects, layers: updatedLayers, selectedIds: pastedIds }
         })
         get().saveCurrentProject()
+
+        // Save paste
+        const manager = getCollaborationManager()
+        if (manager && get().isOnline) manager.saveProject(get())
       },
 
       duplicate: () => { const state = get(); state.copy(); state.paste() },
@@ -602,7 +640,10 @@ export const useHaloboardStore = create<HaloboardState>()(
 
         if (!isRemote) {
           const manager = getCollaborationManager()
-          if (manager) manager.broadcastHistoryNavigation("undo")
+          if (manager) {
+            manager.broadcastHistoryNavigation("undo")
+            manager.saveProject(get()) // Fix: Save state to cloud
+          }
         }
       },
       redo: (isRemote = false) => {
@@ -611,7 +652,10 @@ export const useHaloboardStore = create<HaloboardState>()(
 
         if (!isRemote) {
           const manager = getCollaborationManager()
-          if (manager) manager.broadcastHistoryNavigation("redo")
+          if (manager) {
+            manager.broadcastHistoryNavigation("redo")
+            manager.saveProject(get()) // Fix: Save state to cloud
+          }
         }
       },
       setHistoryIndex: (index, isRemote = false) => {
@@ -619,7 +663,10 @@ export const useHaloboardStore = create<HaloboardState>()(
 
         if (!isRemote) {
           const manager = getCollaborationManager()
-          if (manager) manager.broadcastHistoryNavigation("setIndex", index)
+          if (manager) {
+            manager.broadcastHistoryNavigation("setIndex", index)
+            manager.saveProject(get()) // Fix: Save state to cloud
+          }
         }
       },
       addHistoryStep: (step, isRemote = false) => {
