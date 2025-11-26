@@ -2,12 +2,14 @@ import type { CanvasObject, Point, BroadcastMessage, User, ChatMessage, Layer, H
 import { useHaloboardStore } from "./store"
 import { doc, onSnapshot, updateDoc, setDoc, type DocumentSnapshot, getDoc } from "firebase/firestore"
 import { signInAnonymously } from "firebase/auth"
-import { db, auth } from "./firebaseConfig" // Artık merkezi config kullanılıyor
+import { db, auth } from "./firebaseConfig" // YENİ: Config dosyasından import ediyoruz
 
-// Proje var mı kontrolü (Bağlantı öncesi)
+// Proje var mı kontrolü
 export async function checkProjectExists(projectId: string): Promise<boolean> {
-    if (!db || !projectId) return false;
-    
+    if (!db || !projectId) {
+        console.warn("Database check failed: DB or ProjectID missing");
+        return false;
+    }
     try {
         // Veritabanını okumadan önce giriş yapıldığından emin ol
         if (auth && !auth.currentUser) {
@@ -45,11 +47,11 @@ export class CollaborationManager {
       this.isOnline = !!sOnline;
       
       if (this.isOnline) {
-        // Config dosyasından gelen db ve auth nesnelerini kullan
+        // Online mod: Config'den gelen db ve auth'u kullan
         if (db && auth) {
           this.initFirebase();
         } else {
-          console.error("Firebase not initialized. Check env variables.");
+          console.error("Firebase not initialized. Check firebaseConfig.ts and env variables.");
         }
         
         this.broadcastUserJoin();
@@ -57,6 +59,7 @@ export class CollaborationManager {
           this.requestSync();
         }, 5000); 
       } else {
+        // Offline mod
         this.broadcastChannel = new BroadcastChannel(`teampad-${projectId}`);
         this.broadcastChannel.onmessage = (event) => {
           this.handleMessage(event.data as BroadcastMessage);
@@ -105,7 +108,6 @@ export class CollaborationManager {
       case "USER_JOIN":
         store.addUser(message.user)
         this.broadcastUserJoin()
-        // Yeni kullanıcıya selam ver (cursor göster)
         const boardState = useHaloboardStore.getState()
         const hostUser = boardState.users.find(u => u.id === this.userId)
         if (hostUser && hostUser.cursor) {
@@ -178,9 +180,10 @@ export class CollaborationManager {
 
      const projectRef = doc(db, "projects", this.projectId);
 
-     // Eğer proje sahibiysek (Owner), projeyi veritabanına kaydet/oluştur.
+     // Eğer proje sahibiysek, projeyi veritabanına kaydet.
      if (useHaloboardStore.getState().isOwner) {
          const { objects, layers, canvasSettings } = useHaloboardStore.getState();
+         // Proje yoksa oluştur, varsa güncelleme (merge: true)
          await setDoc(projectRef, {
              objects: objects || [],
              layers: layers || [],
@@ -189,7 +192,7 @@ export class CollaborationManager {
          }, { merge: true });
      }
 
-     // Mevcut veriyi çek
+     // İlk yükleme
      try {
         const docSnap = await getDoc(projectRef);
         if (docSnap.exists()) {
@@ -233,7 +236,7 @@ export class CollaborationManager {
          }
      });
 
-     // Mesajları gönder
+     // Mesaj gönderme döngüsü
      setInterval(async () => {
          if (this.messageQueue.length > 0) {
              const messages = [...this.messageQueue];

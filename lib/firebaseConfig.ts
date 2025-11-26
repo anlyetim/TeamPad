@@ -11,10 +11,8 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Uygulama daha önce başlatılmadıysa başlat (Singleton pattern)
+// Uygulama daha önce başlatılmadıysa başlat, yoksa mevcut olanı al
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-const db = getFirestore(app);
-const auth = getAuth(app);
-
-export { db, auth };
+export const db = getFirestore(app);
+export const auth = getAuth(app);
