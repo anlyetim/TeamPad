@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useHaloboardStore } from "@/lib/store"
 import { useTranslation } from "@/lib/i18n"
-import { checkProjectExists } from "@/lib/collaboration" // Import the helper
+import { checkProjectExists } from "@/lib/collaboration"
 import {
   LayoutGrid, Clock, Star, Users, Trash2, Plus,
   Settings, Users2, MoreVertical, X
@@ -15,7 +15,7 @@ import { SettingsModal } from "./settings-modal"
 import { formatDistanceToNow } from "date-fns"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Label } from "@/components/ui/label"
-import { useToast } from "@/hooks/use-toast" // Import toast
+import { useToast } from "@/hooks/use-toast"
 
 export function Dashboard() {
   const { 
@@ -29,14 +29,14 @@ export function Dashboard() {
   
   const { t } = useTranslation()
   const { highlightColor } = useHaloboardStore()
-  const { toast } = useToast() // Hook for notifications
+  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("dashboard")
   const [showSettings, setShowSettings] = useState(false)
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
   const [showJoinModal, setShowJoinModal] = useState(false)
   const [showAvatarSelector, setShowAvatarSelector] = useState(false)
   const [currentAvatar, setCurrentAvatar] = useState<string>("/placeholder-user.jpg")
-  const [isJoining, setIsJoining] = useState(false) // Loading state
+  const [isJoining, setIsJoining] = useState(false)
 
   // New Project State
   const [projectName, setProjectName] = useState("Untitled Project")
@@ -51,6 +51,7 @@ export function Dashboard() {
   const [joinCode, setJoinCode] = useState("")
   const [nickname, setNickname] = useState("")
 
+  // Avatar Data...
   const sampleAvatars = [
     "/placeholder-user.jpg",
     "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiNGRkQ3MDAiLz4KPGNpcmNsZSBjeD0iMjAiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNGRkRBQzciLz4KPGNpcmNsZSBjeD0iMTUiIGN5PSIxNCIgcj0iMS41IiBmaWxsPSIjMDAwIi8+CjxjaXJjbGUgY3g9IjI1IiBjeT0iMTQiIHI9IjEuNSIgZmlsbD0iIzAwMCIvPgo8cGF0aCBkPSJNMTAgMzBMMzAgMzBMMzAgMzZMMTAgMzBaIiBmaWxsPSIjMDAwIi8+CjxwYXRoIGQ9Ik0xMiAzNkwyOCAzNk0xNiAzOEwyNCAzOE0yMCA0MEwyMCA0MFoiIGZpbGw9IiMwMDAiLz4KPHJlY3QgeD0iMTQiIHk9IjIyIiB3aWR0aD0iMTIiIGhlaWdodD0iMiIgZmlsbD0iIzAwMCIvPgo8L3N2Zz4K",
@@ -208,6 +209,7 @@ export function Dashboard() {
           </Button>
         </div>
 
+        {/* Navigation Menu */}
         <nav className="px-2 space-y-0.5 flex-1">
           <button 
             onClick={() => setActiveTab("dashboard")}
@@ -267,6 +269,7 @@ export function Dashboard() {
           </button>
         </nav>
 
+        {/* Join Project Section at Bottom */}
         <div className="p-4 mt-auto border-t border-neutral-200 dark:border-neutral-800">
            <Button 
              variant="outline"
@@ -279,7 +282,9 @@ export function Dashboard() {
         </div>
       </aside>
 
+      {/* Main Dashboard Area */}
       <main className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-[#121212]">
+        {/* Top Header */}
         <header className="h-16 flex items-center justify-between px-8 border-b border-neutral-100 dark:border-neutral-800">
           <h1 className="text-lg font-semibold text-neutral-800 dark:text-neutral-100">{t("dashboard")}</h1>
           
@@ -297,6 +302,7 @@ export function Dashboard() {
                   <AvatarFallback>U</AvatarFallback>
                </Avatar>
 
+               {/* Avatar Selector Dropdown */}
                {showAvatarSelector && (
                  <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg p-4 z-50">
                    <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-100 mb-3">Choose Avatar</h3>
@@ -327,6 +333,7 @@ export function Dashboard() {
           </div>
         </header>
 
+        {/* Dashboard Content */}
         <div className="flex-1 overflow-y-auto p-8">
           <div className="max-w-7xl mx-auto">
             <div className="flex items-center justify-between mb-8">
@@ -338,6 +345,8 @@ export function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              
+              {/* Create New Card */}
               <div 
                 onClick={() => setShowNewProjectModal(true)}
                 className="aspect-[1.6/1] rounded-xl border-2 border-dashed border-neutral-200 dark:border-neutral-800 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[#0A84FF] hover:bg-[#0A84FF]/5 transition-all group relative overflow-hidden bg-neutral-50/50 dark:bg-neutral-900/50"
@@ -349,15 +358,18 @@ export function Dashboard() {
                   <span className="font-medium text-sm text-neutral-600 dark:text-neutral-400 group-hover:text-[#0A84FF] transition-colors z-10">{t("newProject")}</span>
               </div>
 
+              {/* Project Cards */}
               {projects.map((project) => (
                 <div key={project.id} className="group flex flex-col gap-2">
                   <div 
                     onClick={() => loadProjectById(project.id)}
                     className="aspect-[1.6/1] rounded-xl bg-neutral-100 dark:bg-neutral-800 overflow-hidden cursor-pointer shadow-sm hover:shadow-md hover:-translate-y-1 transition-all relative border border-neutral-200 dark:border-neutral-700"
                   >
+                    {/* Thumbnail Logic */}
                     {project.thumbnail ? (
                       <img src={project.thumbnail} alt={project.name} className="size-full object-cover" />
                     ) : (
+                      // Colorful placeholder gradient
                       <div 
                         className="absolute inset-0 flex items-center justify-center"
                         style={{ 
@@ -368,6 +380,7 @@ export function Dashboard() {
                       </div>
                     )}
                     
+                    {/* Hover Overlay for Actions */}
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 dark:group-hover:bg-white/5 transition-colors" />
 
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity scale-95 group-hover:scale-100">

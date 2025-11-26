@@ -8,6 +8,7 @@ import { useCollaboration } from "@/lib/collaboration"
 import { useTheme } from "next-themes"
 import { useTranslation } from "@/lib/i18n"
 import { MousePointer2 } from "lucide-react"
+import { CollaborationCursors } from "./collaboration-cursors"
 
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -217,7 +218,6 @@ export function Canvas() {
       ctx.lineWidth = 1 / zoom; ctx.fill(); ctx.stroke(); ctx.restore()
     }
     ctx.restore()
-    // Loop to draw cursors removed: handled by CollaborationCursors for remote, and custom overlay for local.
   }
 
   const renderPath = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as PathData; if (data.points.length < 2) return; ctx.globalAlpha = data.opacity; ctx.strokeStyle = data.strokeColor; ctx.lineWidth = data.strokeWidth; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(data.points[0].x, data.points[0].y); for (let i = 1; i < data.points.length; i++) ctx.lineTo(data.points[i].x, data.points[i].y); ctx.stroke() }
@@ -454,29 +454,17 @@ export function Canvas() {
     <div ref={containerRef} className="absolute inset-0 w-full h-full overflow-hidden">
         <canvas 
             ref={canvasRef} 
-            className="block w-full h-full cursor-none" // Force hide system cursor
+            className="block w-full h-full cursor-crosshair"
             onMouseDown={handleMouseDown} 
             onMouseMove={handleMouseMove} 
             onMouseUp={handleMouseUp} 
             onMouseLeave={handleMouseUp} 
             onDoubleClick={handleDoubleClick} 
-            // Removed onWheel={handleWheel} because handleWheel is not defined
         />
         {renderTextEditor()}
         
-        {/* Local User Cursor Overlay */}
-        {currentMousePos && activeTool !== 'brush' && activeTool !== 'eraser' && (
-            <div 
-                className="pointer-events-none absolute z-50"
-                style={{
-                    left: `${currentMousePos.x * zoom + panX}px`,
-                    top: `${currentMousePos.y * zoom + panY}px`,
-                    transform: "translate(-2px, -2px)", 
-                }}
-            >
-               <MousePointer2 className="size-5 fill-black text-white drop-shadow-sm" />
-            </div>
-        )}
+        {/* Remote Cursors Overlay */}
+        <CollaborationCursors />
     </div>
   )
 }
