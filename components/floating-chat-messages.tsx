@@ -5,14 +5,23 @@ import { useHaloboardStore } from "@/lib/store"
 import type { ChatMessage } from "@/lib/types"
 
 interface FloatingMessage extends ChatMessage {
-  x: number
-  y: number
+  userId: string
   visible: boolean
 }
 
 export function FloatingChatMessages() {
   const [floatingMessages, setFloatingMessages] = useState<FloatingMessage[]>([])
   const { chatMessages, users, zoom, panX, panY } = useHaloboardStore()
+  // Force re-render on cursor updates for smooth animation
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTick(t => t + 1)
+    }, 50)
+
+    return () => clearInterval(interval)
+  }, [])
 
   // Show new messages as floating bubbles above user cursors
   useEffect(() => {
@@ -30,8 +39,7 @@ export function FloatingChatMessages() {
     // Add floating message
     const newFloatingMessage: FloatingMessage = {
       ...latestMessage,
-      x: user.cursor.x,
-      y: user.cursor.y - 60, // Position above cursor
+      userId: latestMessage.userId,
       visible: true,
     }
 
@@ -52,6 +60,9 @@ export function FloatingChatMessages() {
     <>
       {floatingMessages.map((msg) => {
         const user = users.find((u) => u.id === msg.userId)
+        const cursorPosition = user?.cursor
+
+        if (!cursorPosition) return null
 
         return (
           <div
@@ -60,8 +71,9 @@ export function FloatingChatMessages() {
               msg.visible ? "opacity-100" : "opacity-0"
             }`}
             style={{
-              left: `${msg.x * zoom + panX}px`,
-              top: `${msg.y * zoom + panY}px`,
+              left: `${cursorPosition.x * zoom + panX}px`,
+              top: `${(cursorPosition.y - 60) * zoom + panY}px`,
+              transform: "translate(-50%, -100%)",
             }}
           >
             <div className="rounded-lg bg-neutral-800 px-3 py-2 text-sm text-white shadow-lg dark:bg-neutral-700">

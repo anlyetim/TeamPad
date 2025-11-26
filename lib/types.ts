@@ -139,8 +139,10 @@ export interface User {
   id: string
   name: string
   color: string
+  avatar?: string
   cursor?: Point
   lastActive?: number
+  isAdmin?: boolean
 }
 
 export interface ChatMessage {
@@ -153,6 +155,10 @@ export interface ChatMessage {
 export interface HistoryStep {
   objects: CanvasObject[]
   layers: Layer[]
+  userId?: string
+  userName?: string
+  userColor?: string
+  action?: string
 }
 
 export type Keybindings = {
@@ -178,6 +184,13 @@ export type BroadcastMessage =
   | { type: "CURSOR_MOVE"; userId: string; userName: string; userColor: string; position: Point }
   | { type: "OBJECT_UPDATE"; object: CanvasObject }
   | { type: "OBJECT_DELETE"; objectId: string }
+  | { type: "LAYER_UPDATE"; layer: Layer }
+  | { type: "LAYER_DELETE"; layerId: string }
+  | { type: "HISTORY_UPDATE"; historyStep: HistoryStep }
+  | { type: "HISTORY_NAVIGATION"; action: "undo" | "redo" | "setIndex"; index?: number }
   | { type: "USER_JOIN"; user: User }
   | { type: "USER_LEAVE"; userId: string }
+  | { type: "USER_KICK"; userId: string }
   | { type: "CHAT_MESSAGE"; message: ChatMessage }
+  | { type: "SYNC_REQUEST"; userId: string }
+  | { type: "SYNC_RESPONSE"; userId: string; objects: CanvasObject[]; layers: Layer[]; users: User[]; history: HistoryStep[] }

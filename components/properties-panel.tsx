@@ -104,7 +104,7 @@ export function PropertiesPanel() {
 
               {/* Add Layer Button */}
               <button
-                onClick={addLayer}
+                onClick={() => addLayer("New Layer")}
                 className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-neutral-300 p-2 text-sm font-medium text-neutral-600 transition-colors hover:border-[#0A84FF] hover:text-[#0A84FF] dark:border-neutral-600 dark:text-neutral-400 dark:hover:border-[#0A84FF]"
               >
                 <Plus className="size-4" />

@@ -14,13 +14,17 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { SettingsModal } from "@/components/settings-modal"
+import { UserListModal } from "@/components/user-list-modal" // New import
 import { useToast } from "@/hooks/use-toast"
 import { useTranslation } from "@/lib/i18n"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export function Header() {
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [showUserListModal, setShowUserListModal] = useState(false) // State for user list
+
   const [projectName, setProjectName] = useState("Untitled Project")
   const [projectMode, setProjectMode] = useState<"infinite" | "fixed">("infinite")
   const [projectWidth, setProjectWidth] = useState(1920)
@@ -31,7 +35,7 @@ export function Header() {
   const [tempName, setTempName] = useState("")
   const nameInputRef = useRef<HTMLInputElement>(null)
 
-  const users = useHaloboardStore((state) => state.users)
+  const { users, currentUserId, isOnline } = useHaloboardStore()
   const { resetProject, loadProject, canvasSettings, setCanvasSettings, addObject, addLayer, updateLayer, highlightColor, setIsProjectMinimized } = useHaloboardStore()
   const { theme, setTheme } = useTheme()
   const storage = useStorage()
@@ -111,13 +115,12 @@ export function Header() {
     <>
       <header className="absolute left-0 right-0 top-0 z-40 flex h-14 items-center justify-between border-b border-neutral-200/80 bg-neutral-100/50 px-4 backdrop-blur-sm dark:border-neutral-800/80 dark:bg-neutral-900/50">
         <div className="flex items-center gap-4">
-          {/* Dashboard Button - Replaces Menu */}
           <Button 
             variant="ghost" 
-            className="gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 font-medium text-neutral-700 dark:text-neutral-300"
+            className="gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 font-medium text-neutral-700 dark:text-neutral-300 rounded-lg"
             onClick={() => setIsProjectMinimized(true)}
           >
-            <LayoutGrid className="size-4" /> {/* Using LayoutGrid as icon */}
+            <LayoutGrid className="size-4" /> 
             {t("dashboard")}
           </Button>
 
@@ -133,7 +136,6 @@ export function Header() {
           </DropdownMenu>
           <input type="file" accept=".tpad,.json" ref={fileInputRef} className="hidden" onChange={handleImportTPAD} />
           <input type="file" accept="image/*" ref={imgInputRef} className="hidden" onChange={handleImportBackground} />
-          <div className="flex gap-2"><div className="size-3 rounded-full bg-red-500" /><div className="size-3 rounded-full bg-yellow-500" /><div className="size-3 rounded-full bg-green-500" /></div>
         </div>
         
         <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-3">
@@ -161,10 +163,37 @@ export function Header() {
         </div>
 
         <div className="flex flex-1 items-center justify-end gap-3">
-          <div className="flex items-center -space-x-2">{users.slice(0, 3).map((user) => (<div key={user.id} className="size-8 rounded-full border-2 border-white dark:border-neutral-800" style={{ backgroundColor: user.color }} title={user.name} />))}{users.length > 3 && (<div className="flex size-8 items-center justify-center rounded-full border-2 border-white bg-neutral-200 text-xs font-semibold text-neutral-600 dark:border-neutral-800 dark:bg-neutral-700 dark:text-neutral-300">+{users.length - 3}</div>)}</div>
+          {/* User List Trigger - Only show in online mode */}
+          {isOnline && (
+            <div
+              className="flex items-center -space-x-2 mr-2 cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => setShowUserListModal(true)}
+            >
+              {users.slice(0, 5).map((user) => (
+                  <div
+                      key={user.id}
+                      className="size-8 rounded-full border-2 border-white dark:border-neutral-800 flex items-center justify-center text-xs font-bold text-white hover:z-10 transition-transform hover:scale-110 shadow-sm"
+                      style={{ backgroundColor: user.color }}
+                      title={user.name}
+                  >
+                      {user.name.charAt(0).toUpperCase()}
+                  </div>
+              ))}
+              {users.length > 5 && (
+                  <div className="flex size-8 items-center justify-center rounded-full border-2 border-white bg-neutral-200 text-xs font-semibold text-neutral-600 dark:border-neutral-800 dark:bg-neutral-700 dark:text-neutral-300">
+                      +{users.length - 5}
+                  </div>
+              )}
+            </div>
+          )}
+
           <ExportMenu />
-          <Button onClick={() => setShowInviteModal(true)} className="h-8 gap-2 text-sm font-semibold text-white hover:opacity-90" style={{ backgroundColor: highlightColor }}><Share2 className="size-4" /> {t("share")}</Button>
+          {/* Share button - Only show in online mode */}
+          {isOnline && (
+            <Button onClick={() => setShowInviteModal(true)} className="h-8 gap-2 text-sm font-semibold text-white hover:opacity-90" style={{ backgroundColor: highlightColor }}><Share2 className="size-4" /> {t("share")}</Button>
+          )}
           
+          {/* Settings Modal Trigger */}
           <Button 
             onClick={() => setShowSettingsModal(true)} 
             variant="ghost" 
@@ -178,6 +207,7 @@ export function Header() {
       
       <InviteModal isOpen={showInviteModal} onClose={() => setShowInviteModal(false)} />
       <SettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} />
+      <UserListModal isOpen={showUserListModal} onClose={() => setShowUserListModal(false)} />
       
       {showNewProjectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">

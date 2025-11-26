@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useHaloboardStore } from "@/lib/store"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
@@ -9,11 +9,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { 
-  Eye, EyeOff, Lock, LockOpen, ChevronDown, ChevronRight, Plus, Trash2, 
+import {
+  Eye, EyeOff, Lock, LockOpen, ChevronDown, ChevronRight, Plus, Trash2,
   Minimize2, Maximize2, RotateCcw, Clock,
   AlignLeft, AlignCenter, AlignRight, Type, Image as ImageIcon, Upload,
-  BoxSelect, Eraser, GripVertical
+  BoxSelect, Eraser, GripVertical, Send
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { AnchorPosition } from "@/lib/types"
@@ -54,7 +54,7 @@ function PropertiesSection() {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader(); reader.onload = (event) => {
       const src = event.target?.result as string; const img = new Image(); img.onload = () => {
-        addObject({ id: `image-${Date.now()}`, type: "image", layerId: "layer-1", transform: { x: -panX / zoom + 100, y: -panY / zoom + 100, rotation: 0, scaleX: 1, scaleY: 1, anchor: "top-left" }, data: { src, width: 200, height: 200 * (img.height / img.width), opacity: 1, blendMode: 'normal' } })
+        addObject({ id: `image-${Date.now()}`, name: "Image", type: "image", layerId: "layer-1", transform: { x: -panX / zoom + 100, y: -panY / zoom + 100, rotation: 0, scaleX: 1, scaleY: 1, anchor: "top-left" }, data: { src, width: 200, height: 200 * (img.height / img.width), opacity: 1, blendMode: 'normal' } })
       }; img.src = src;
     }; reader.readAsDataURL(file); e.target.value = '';
   }
@@ -221,12 +221,144 @@ function HistorySection() {
   const { history, historyIndex, setHistoryIndex, undo, redo } = useHaloboardStore()
   const { t } = useTranslation()
   return (
-    <div className="flex flex-col gap-2 pt-2"><div className="flex gap-2 mb-2"><Button variant="outline" size="sm" onClick={undo} disabled={historyIndex <= 0} className="flex-1 gap-1 h-8"><RotateCcw className="size-3" /> {t("undo")}</Button><Button variant="outline" size="sm" onClick={redo} disabled={historyIndex >= history.length - 1} className="flex-1 gap-1 h-8"><Clock className="size-3" /> {t("redo")}</Button></div><ScrollArea className="h-32 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white/50 dark:bg-neutral-900/50"><div className="p-2 space-y-1">{history.map((_, i) => (<button key={i} onClick={() => setHistoryIndex(i)} className={cn("w-full text-left px-2 py-1 text-xs rounded transition-colors truncate", i === historyIndex ? "bg-[#0A84FF]/10 text-[#0A84FF] font-medium" : "text-neutral-600 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5")}>{i === 0 ? t("initialState") : `${t("action")} ${i}`} {i === historyIndex && `(${t("current")})`}</button>))}</div></ScrollArea></div>
+    <div className="flex flex-col gap-2 pt-2"><div className="flex gap-2 mb-2"><Button variant="outline" size="sm" onClick={() => undo()} disabled={historyIndex <= 0} className="flex-1 gap-1 h-8"><RotateCcw className="size-3" /> {t("undo")}</Button><Button variant="outline" size="sm" onClick={() => redo()} disabled={historyIndex >= history.length - 1} className="flex-1 gap-1 h-8"><Clock className="size-3" /> {t("redo")}</Button></div><ScrollArea className="h-32 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white/50 dark:bg-neutral-900/50"><div className="p-2 space-y-1">{history.map((step, i) => {
+        const actionText = i === 0 ? t("initialState") : (step.action || `${t("action")} ${i}`)
+        const displayText = i === historyIndex ? `${actionText} (${t("current")})` : actionText
+        const textColor = step.userColor || "#666666"
+        return (
+          <button
+            key={i}
+            onClick={() => setHistoryIndex(i)}
+            className={cn(
+              "w-full text-left px-2 py-1 text-xs rounded transition-colors truncate",
+              i === historyIndex ? "bg-[#0A84FF]/10 text-[#0A84FF] font-medium" : "text-neutral-600 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5"
+            )}
+            style={i === historyIndex ? {} : { color: textColor }}
+          >
+            {displayText}
+          </button>
+        )
+      })}</div></ScrollArea></div>
   )
 }
-function ChatSection() { 
+function ChatSection() {
+  const [message, setMessage] = useState("")
+  const chatRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
-  return <div className="flex flex-col h-64 pt-2"><div className="flex-1 flex items-center justify-center text-xs text-neutral-400">{t("chat")} disabled in offline mode</div></div> 
+
+  const { chatMessages, addChatMessage, users, currentUserId, highlightColor } = useHaloboardStore()
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight
+    }
+  }, [chatMessages])
+
+  const handleSendMessage = () => {
+    if (!message.trim()) return
+
+    addChatMessage({
+      id: `msg-${Date.now()}`,
+      userId: currentUserId,
+      content: message,
+      timestamp: Date.now(),
+    })
+
+    setMessage("")
+  }
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSendMessage()
+    }
+  }
+
+  const getUserById = (userId: string) => {
+    return users.find((u) => u.id === userId)
+  }
+
+  return (
+    <div className="flex flex-col h-64 pt-2">
+      {/* Messages */}
+      <div ref={chatRef} className="flex-1 space-y-3 overflow-y-auto pr-1">
+        {chatMessages.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+              No messages yet.
+            </p>
+          </div>
+        ) : (
+          chatMessages.map((msg) => {
+            const user = getUserById(msg.userId)
+            const isCurrentUser = msg.userId === currentUserId
+
+            return (
+              <div key={msg.id} className={`flex gap-2 ${isCurrentUser ? "flex-row-reverse" : ""}`}>
+                {/* Avatar */}
+                <div
+                  className="size-6 flex-shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                  style={{ backgroundColor: user?.color || "#999999" }}
+                >
+                   {user?.name?.charAt(0).toUpperCase() || "?"}
+                </div>
+
+                {/* Message Content */}
+                <div className={`flex flex-col gap-1 max-w-[calc(100%-2rem)] ${isCurrentUser ? "items-end" : ""}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                      {isCurrentUser ? "You" : user?.name || "Unknown"}
+                    </span>
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                      {new Date(msg.timestamp).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <div
+                    className={`max-w-xs rounded-lg px-2 py-1 text-sm break-words ${
+                      isCurrentUser
+                        ? "text-white"
+                        : "bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200"
+                    }`}
+                    style={isCurrentUser ? { backgroundColor: highlightColor } : {}}
+                  >
+                    {msg.content}
+                  </div>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* Input */}
+      <div className="border-t border-neutral-200 pt-2 dark:border-neutral-800">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Type a message..."
+            className="flex-1 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-sm outline-none focus:ring-2 dark:border-neutral-700 dark:bg-neutral-800"
+            style={{ "--ring": highlightColor } as React.CSSProperties}
+          />
+          <Button
+            onClick={handleSendMessage}
+            disabled={!message.trim()}
+            size="sm"
+            className="hover:opacity-90"
+            style={{ backgroundColor: highlightColor }}
+          >
+            <Send className="size-3" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function RightPanel() {
