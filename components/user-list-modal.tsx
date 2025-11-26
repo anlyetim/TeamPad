@@ -11,7 +11,7 @@ interface UserListModalProps {
 }
 
 export function UserListModal({ isOpen, onClose }: UserListModalProps) {
-  const { users, currentUserId, isOwner, highlightColor, removeUser } = useHaloboardStore()
+  const { users, currentUserId, isOwner, highlightColor, removeUser, maxUsers, setMaxUsers } = useHaloboardStore();
   const { t } = useTranslation()
 
   if (!isOpen) return null
@@ -101,6 +101,22 @@ export function UserListModal({ isOpen, onClose }: UserListModalProps) {
             })
           )}
         </div>
+        <div className="flex items-center gap-2 mt-4">
+          <span className="text-xs text-neutral-400">Max users:</span>
+          {isOwner ? (
+            <>
+              <button type="button" className="px-2 py-1 border rounded disabled:opacity-30" onClick={() => setMaxUsers(maxUsers - 1)} disabled={maxUsers <= 2}>-</button>
+              <span className="px-2 text-xs font-bold">{maxUsers}</span>
+              <button type="button" className="px-2 py-1 border rounded disabled:opacity-30" onClick={() => setMaxUsers(maxUsers + 1)} disabled={maxUsers >= 6}>+</button>
+            </>
+          ) : (
+            <span className="px-2 text-xs font-bold">{maxUsers}</span>
+          )}
+          <span className="ml-4 text-xs">({users.length} / {maxUsers} joined)</span>
+        </div>
+        {users.length === maxUsers && (
+          <div className="mt-2 text-xs text-red-500">Maximum user count reached.</div>
+        )}
       </div>
     </div>
   )

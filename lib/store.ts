@@ -155,6 +155,8 @@ interface HaloboardState {
   setIsPanning: (isPanning: boolean) => void
   togglePropertiesPanel: () => void
   toggleChat: () => void
+  maxUsers: number; // Add this line
+  setMaxUsers: (n: number) => void; // Add this line
 }
 
 const initialUserId = `user-${Math.random().toString(36).substr(2, 9)}`
@@ -181,22 +183,27 @@ export const useHaloboardStore = create<HaloboardState>()(
       removeNotification: (id) => set(state => ({ notifications: state.notifications.filter(n => n.id !== id) })),
 
       joinProject: (code, nickname) => {
-          const newId = code
-          const myColor = generateColor()
-          // Reset state but keep keybindings/theme
-          set(state => ({
-              currentUserId: initialUserId,
-              users: [{ id: initialUserId, name: nickname, color: myColor, avatar: "/placeholder-user.jpg", lastActive: Date.now(), isAdmin: false }],
-              currentProjectId: newId,
-              activeView: "canvas",
-              isProjectMinimized: false,
-              isOwner: false, // Joining users are not owners
-              isOnline: true, // Joined projects are online
-              objects: [], // Clear existing objects, wait for sync
-              layers: [{ id: "layer-1", name: "Layer 1", opacity: 1, blendMode: "normal", visible: true, locked: false, objectIds: [] }],
-              chatMessages: []
-          }))
-          get().addNotification(`Joined project: ${code} as ${nickname}`)
+        // Prevent exceeding max users
+        if (get().users.length >= get().maxUsers) {
+          get().addNotification("The project is currently at maximum user capacity.")
+          return
+        }
+        const newId = code
+        const myColor = generateColor()
+        // Reset state but keep keybindings/theme
+        set(state => ({
+          currentUserId: initialUserId,
+          users: [{ id: initialUserId, name: nickname, color: myColor, avatar: "/placeholder-user.jpg", lastActive: Date.now(), isAdmin: false }],
+          currentProjectId: newId,
+          activeView: "canvas",
+          isProjectMinimized: false,
+          isOwner: false, // Joining users are not owners
+          isOnline: true, // Joined projects are online
+          objects: [], // Clear existing objects, wait for sync
+          layers: [{ id: "layer-1", name: "Layer 1", opacity: 1, blendMode: "normal", visible: true, locked: false, objectIds: [] }],
+          chatMessages: []
+        }))
+        get().addNotification(`Joined project: ${code} as ${nickname}`)
       },
 
       saveCurrentProject: (thumbnail) => {
@@ -622,7 +629,15 @@ export const useHaloboardStore = create<HaloboardState>()(
         }
       },
 
-      addUser: (user) => set((state) => ({ users: [...state.users, user] })),
+      addUser: (user) => set((state) => {
+        // Don't add duplicate user IDs! (Fixes runaway user count crash)
+        if (state.users.find(u => u.id === user.id)) return {};
+        if (state.users.length >= state.maxUsers) {
+          get().addNotification("The project is currently at maximum user capacity.");
+          return {};
+        }
+        return { users: [...state.users, user] }
+      }),
       updateUser: (id, updates) => set((state) => ({ users: state.users.map((user) => (user.id === id ? { ...user, ...updates } : user)) })),
       
       removeUser: (id, isKick = false) => {
@@ -638,6 +653,8 @@ export const useHaloboardStore = create<HaloboardState>()(
       setIsPanning: (isPanning) => set({ isPanning }),
       togglePropertiesPanel: () => set((state) => ({ showPropertiesPanel: !state.showPropertiesPanel })),
       toggleChat: () => set((state) => ({ showChat: !state.showChat })),
+      maxUsers: 4,
+      setMaxUsers: (n) => set({ maxUsers: Math.max(2, Math.min(6, n)) }),
     }),
     {
       name: 'haloboard-storage',
