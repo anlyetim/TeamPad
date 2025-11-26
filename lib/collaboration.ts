@@ -2,20 +2,18 @@ import type { CanvasObject, Point, BroadcastMessage, User, ChatMessage, Layer, H
 import { useHaloboardStore } from "./store"
 import { doc, onSnapshot, updateDoc, setDoc, type DocumentSnapshot, getDoc } from "firebase/firestore"
 import { signInAnonymously } from "firebase/auth"
-import { db, auth } from "./firebaseConfig" // Yeni config dosyasından import ediyoruz
+import { db, auth } from "./firebaseConfig" // Artık merkezi config kullanılıyor
 
-// Projenin var olup olmadığını kontrol eden yardımcı fonksiyon
+// Proje var mı kontrolü (Bağlantı öncesi)
 export async function checkProjectExists(projectId: string): Promise<boolean> {
-    if (!db || !projectId) {
-        console.warn("Database connection not available or Project ID missing.");
-        return false;
-    }
+    if (!db || !projectId) return false;
+    
     try {
-        // Kontrol etmeden önce anonim giriş yapıldığından emin ol (Firestore kuralları için)
+        // Veritabanını okumadan önce giriş yapıldığından emin ol
         if (auth && !auth.currentUser) {
             await signInAnonymously(auth);
         }
-        
+
         const docRef = doc(db, "projects", projectId);
         const docSnap = await getDoc(docRef);
         return docSnap.exists();
@@ -47,19 +45,18 @@ export class CollaborationManager {
       this.isOnline = !!sOnline;
       
       if (this.isOnline) {
-        // Online mod: Firebase kullan
+        // Config dosyasından gelen db ve auth nesnelerini kullan
         if (db && auth) {
           this.initFirebase();
         } else {
-            console.error("Firebase not initialized properly check firebaseConfig.ts");
+          console.error("Firebase not initialized. Check env variables.");
         }
-        // Katılım olayını yayınla
+        
         this.broadcastUserJoin();
         this.syncInterval = setInterval(() => {
           this.requestSync();
         }, 5000); 
       } else {
-        // Offline mod: Sadece BroadcastChannel
         this.broadcastChannel = new BroadcastChannel(`teampad-${projectId}`);
         this.broadcastChannel.onmessage = (event) => {
           this.handleMessage(event.data as BroadcastMessage);
@@ -73,7 +70,6 @@ export class CollaborationManager {
   }
 
   private handleMessage(message: BroadcastMessage) {
-    // Kendi mesajlarımızı işleme
     if ('userId' in message && message.userId === this.userId) return
     if (message.type === 'USER_JOIN' && message.user.id === this.userId) return
 
@@ -99,13 +95,9 @@ export class CollaborationManager {
         store.addHistoryStep(message.historyStep, true)
         break
       case "HISTORY_NAVIGATION":
-        if (message.action === "undo") {
-          store.undo(true)
-        } else if (message.action === "redo") {
-          store.redo(true)
-        } else if (message.action === "setIndex" && message.index !== undefined) {
-          store.setHistoryIndex(message.index, true)
-        }
+        if (message.action === "undo") { store.undo(true) } 
+        else if (message.action === "redo") { store.redo(true) } 
+        else if (message.action === "setIndex" && message.index !== undefined) { store.setHistoryIndex(message.index, true) }
         break
       case "CHAT_MESSAGE":
         store.addChatMessage(message.message, true)
@@ -113,8 +105,7 @@ export class CollaborationManager {
       case "USER_JOIN":
         store.addUser(message.user)
         this.broadcastUserJoin()
-        
-        // Yeni gelen kullanıcının bizi görebilmesi için konumumuzu gönderelim
+        // Yeni kullanıcıya selam ver (cursor göster)
         const boardState = useHaloboardStore.getState()
         const hostUser = boardState.users.find(u => u.id === this.userId)
         if (hostUser && hostUser.cursor) {
@@ -127,18 +118,13 @@ export class CollaborationManager {
       case "USER_KICK":
         if (message.userId === this.userId) {
           const currentProjectId = useHaloboardStore.getState().currentProjectId
-          const setStore = useHaloboardStore.setState
           if (currentProjectId) {
-            setStore((state) => ({
+            useHaloboardStore.setState((state) => ({
                 kickedProjectIds: [...(state.kickedProjectIds || []), currentProjectId],
                 projects: state.projects.filter(p => p.id !== currentProjectId)
             }))
           }
           useHaloboardStore.setState({ activeView: "dashboard", currentProjectId: null })
-          if (currentProjectId) {
-            const store = useHaloboardStore.getState()
-            store.deleteProject(currentProjectId)
-          }
           useHaloboardStore.getState().resetProject()
           this.disconnect()
         } else {
@@ -170,12 +156,9 @@ export class CollaborationManager {
           } else if (message.objects.length > store.objects.length) {
             store.loadProject({ objects: message.objects, layers: message.layers })
           }
-          
           if (message.users) {
             message.users.forEach(user => {
-              if (!store.users.find(u => u.id === user.id)) {
-                store.addUser(user)
-              }
+              if (!store.users.find(u => u.id === user.id)) store.addUser(user)
             })
           }
           if (message.history && message.history.length > store.history.length) {
@@ -195,7 +178,7 @@ export class CollaborationManager {
 
      const projectRef = doc(db, "projects", this.projectId);
 
-     // Eğer projeyi oluşturan kişiysek (Owner), veritabanında kaydın oluştuğundan emin olalım.
+     // Eğer proje sahibiysek (Owner), projeyi veritabanına kaydet/oluştur.
      if (useHaloboardStore.getState().isOwner) {
          const { objects, layers, canvasSettings } = useHaloboardStore.getState();
          await setDoc(projectRef, {
@@ -206,7 +189,7 @@ export class CollaborationManager {
          }, { merge: true });
      }
 
-     // İlk bağlantıda mevcut veriyi çekmeyi dene
+     // Mevcut veriyi çek
      try {
         const docSnap = await getDoc(projectRef);
         if (docSnap.exists()) {
@@ -226,7 +209,7 @@ export class CollaborationManager {
          console.error("Failed to fetch initial project state:", e);
      }
 
-     // Gerçek zamanlı güncellemeleri dinle
+     // Dinlemeye başla
      this.unsubscribe = onSnapshot(projectRef, (docSnapshot: DocumentSnapshot) => {
          if (!docSnapshot.exists()) return;
 
@@ -243,7 +226,6 @@ export class CollaborationManager {
 
          if (data.messages && Array.isArray(data.messages)) {
              data.messages.forEach((msg: any) => {
-                 // 30 saniye tolerans
                  if (msg.userId !== this.userId && msg.timestamp > Date.now() - 30000) { 
                      this.handleMessage(msg as BroadcastMessage);
                  }
@@ -251,7 +233,7 @@ export class CollaborationManager {
          }
      });
 
-     // Mesaj kuyruğunu periyodik olarak gönder
+     // Mesajları gönder
      setInterval(async () => {
          if (this.messageQueue.length > 0) {
              const messages = [...this.messageQueue];

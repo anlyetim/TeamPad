@@ -11,21 +11,10 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Global değişkenler (Build sırasında hata almamak için try-catch bloğu)
-let app;
-let db: any;
-let auth: any;
+// Uygulama daha önce başlatılmadıysa başlat (Singleton pattern)
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-if (firebaseConfig.apiKey) {
-  try {
-    app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-    db = getFirestore(app);
-    auth = getAuth(app);
-  } catch (error) {
-    console.error("Firebase initialization error:", error);
-  }
-} else {
-  console.warn("Firebase config missing (Build time or env vars missing)");
-}
+const db = getFirestore(app);
+const auth = getAuth(app);
 
 export { db, auth };
