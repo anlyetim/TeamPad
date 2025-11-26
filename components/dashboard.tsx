@@ -22,7 +22,6 @@ export function Dashboard() {
     createNewProject, 
     loadProjectById, 
     deleteProject, 
-    highlightColor,
     joinProject,
     canvasSettings
   } = useHaloboardStore()
