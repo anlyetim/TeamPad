@@ -11,21 +11,35 @@ const firebaseConfig = firebaseConfigString ? JSON.parse(firebaseConfigString) :
 let db: any;
 let auth: any;
 
-if (typeof window !== 'undefined' && firebaseConfig && firebaseConfig.apiKey) {
-    try {
-        const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-        db = getFirestore(app);
-        auth = getAuth(app);
-    } catch (e) {
-        console.warn("Firebase initialization failed:", e);
+// Helper to initialize DB on demand if needed
+const ensureDbInitialized = () => {
+    if (db) return db;
+    if (typeof window !== 'undefined' && firebaseConfig && firebaseConfig.apiKey) {
+        try {
+            const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            return db;
+        } catch (e) {
+            console.warn("Firebase initialization failed:", e);
+            return null;
+        }
     }
-}
+    return null;
+};
+
+// Ensure DB is initialized at module load if possible
+ensureDbInitialized();
 
 // Helper to validate project existence before joining
 export async function checkProjectExists(projectId: string): Promise<boolean> {
-    if (!db || !projectId) return false;
+    const database = ensureDbInitialized();
+    if (!database || !projectId) {
+        console.warn("Database or Project ID missing during check.");
+        return false;
+    }
     try {
-        const docRef = doc(db, "projects", projectId);
+        const docRef = doc(database, "projects", projectId);
         const docSnap = await getDoc(docRef);
         return docSnap.exists();
     } catch (e) {
@@ -56,6 +70,7 @@ export class CollaborationManager {
       this.isOnline = !!sOnline;
       if (this.isOnline) {
         // Online mode: Only setup Firebase
+        ensureDbInitialized();
         if (db && auth) {
           this.initFirebase();
         }
@@ -63,7 +78,7 @@ export class CollaborationManager {
         this.broadcastUserJoin();
         this.syncInterval = setInterval(() => {
           this.requestSync();
-        }, 5000); // Relaxed interval
+        }, 5000); 
       } else {
         // Offline mode: Only BroadcastChannel
         this.broadcastChannel = new BroadcastChannel(`teampad-${projectId}`);
@@ -213,17 +228,16 @@ export class CollaborationManager {
 
      const projectRef = doc(db, "projects", this.projectId);
 
-     // FIX: If I am the owner (creator), ensure the project exists in DB immediately.
-     // This prevents "Project not found" for others trying to join.
+     // FIX: Ensure the project is created in the database immediately if we are the owner.
      if (useHaloboardStore.getState().isOwner) {
          const { objects, layers, canvasSettings } = useHaloboardStore.getState();
-         // Use setDoc with merge to ensure existence without overwriting if it somehow exists
-         setDoc(projectRef, {
+         // Use setDoc with merge: true to safely initialize or update
+         await setDoc(projectRef, {
              objects: objects || [],
              layers: layers || [],
              canvasSettings: canvasSettings || {},
              lastUpdated: Date.now()
-         }, { merge: true }).catch(e => console.error("Failed to init project in DB:", e));
+         }, { merge: true });
      }
 
      // Attempt initial fetch to sync state
@@ -266,6 +280,7 @@ export class CollaborationManager {
          // Process remote messages from Firebase
          if (data.messages && Array.isArray(data.messages)) {
              data.messages.forEach((msg: any) => {
+                 // Extended timeout to 30s to account for clock skew
                  if (msg.userId !== this.userId && msg.timestamp > Date.now() - 30000) { 
                      this.handleMessage(msg as BroadcastMessage);
                  }

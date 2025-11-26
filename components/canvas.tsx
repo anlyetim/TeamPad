@@ -7,7 +7,7 @@ import type { Point, CanvasObject, PathData, ShapeData, TextData, NoteData, Imag
 import { useCollaboration } from "@/lib/collaboration"
 import { useTheme } from "next-themes"
 import { useTranslation } from "@/lib/i18n"
-import { MousePointer2 } from "lucide-react"
+import { MousePointer2, Crown } from "lucide-react" // Added Crown import
 import { CollaborationCursors } from "./collaboration-cursors"
 
 export function Canvas() {
@@ -69,6 +69,9 @@ export function Canvas() {
   } = useHaloboardStore()
 
   const collaboration = useCollaboration(currentProjectId, currentUserId)
+  
+  // Find current user data for cursor styling
+  const currentUser = users.find(u => u.id === currentUserId)
 
   useEffect(() => {
     const canvas = canvasRef.current; const container = containerRef.current
@@ -454,17 +457,40 @@ export function Canvas() {
     <div ref={containerRef} className="absolute inset-0 w-full h-full overflow-hidden">
         <canvas 
             ref={canvasRef} 
-            className="block w-full h-full cursor-crosshair"
+            className="block w-full h-full cursor-none" // Force hide system cursor
             onMouseDown={handleMouseDown} 
             onMouseMove={handleMouseMove} 
             onMouseUp={handleMouseUp} 
             onMouseLeave={handleMouseUp} 
             onDoubleClick={handleDoubleClick} 
+            
         />
         {renderTextEditor()}
         
-        {/* Remote Cursors Overlay */}
+        {/* Remote Users Overlay */}
         <CollaborationCursors />
+
+        {/* Local User Custom Cursor Overlay */}
+        {currentMousePos && currentUser && activeTool !== 'brush' && activeTool !== 'eraser' && (
+            <div 
+                className="pointer-events-none absolute z-50 transition-transform duration-100 ease-linear"
+                style={{
+                    left: `${currentMousePos.x * zoom + panX}px`,
+                    top: `${currentMousePos.y * zoom + panY}px`,
+                    transform: "translate(-2px, -2px)", 
+                }}
+            >
+               <div className="relative">
+                 <MousePointer2 className="size-5 drop-shadow-md" style={{ color: currentUser.color, fill: currentUser.color }} />
+                 {currentUser.isAdmin && (
+                   <Crown className="absolute -top-1 -right-1 size-3 drop-shadow-md" style={{ color: "#FFD700", fill: "#FFD700" }} />
+                 )}
+               </div>
+               <div className="mt-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium text-white shadow-sm" style={{ backgroundColor: currentUser.color }}>
+                 {currentUser.name || "Me"}
+               </div>
+            </div>
+        )}
     </div>
   )
 }
