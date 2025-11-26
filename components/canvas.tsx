@@ -62,7 +62,8 @@ export function Canvas() {
     copy, paste, duplicate,
     keybindings,
     currentUserId,
-    currentProjectId // We need this for collaboration!
+    currentProjectId,
+    users // <-- add selection of users
   } = useHaloboardStore()
 
   // Initialize collaboration with Project ID and User ID
@@ -218,6 +219,28 @@ export function Canvas() {
       ctx.lineWidth = 1 / zoom; ctx.fill(); ctx.stroke(); ctx.restore()
     }
     ctx.restore()
+
+    // Draw all remote and local user cursors
+    users.forEach(user => {
+      if (user.cursor) {
+        const [cursorX, cursorY] = [user.cursor.x, user.cursor.y];
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cursorX, cursorY, 8, 0, 2 * Math.PI, false);
+        ctx.fillStyle = user.color || '#777';
+        ctx.globalAlpha = 0.9;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Draw username below cursor
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = user.color || '#777';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(user.name || 'User', cursorX, cursorY + 12);
+        ctx.restore();
+      }
+    });
   }
 
   // Render Helpers (Condensed for brevity as they are unchanged logic)
