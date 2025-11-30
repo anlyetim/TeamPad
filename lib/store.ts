@@ -72,8 +72,7 @@ interface HaloboardState {
   layers: Layer[]
   activeLayerId: string
   selectedIds: string[]
-  clipboard: CanvasObject[]
-  
+
   history: HistoryStep[]
   historyIndex: number
 
@@ -97,10 +96,45 @@ interface HaloboardState {
 
   users: User[]
   currentUserId: string
-  updateUserCursor: (userId: string, position: Point, name?: string, color?: string) => void
-  
+  updateUserCursor: (userId: string, position: Point, name?: string, color?: string, tool?: ToolType) => void
+
   chatMessages: ChatMessage[]
   addChatMessage: (message: ChatMessage, isRemote?: boolean) => void
+
+  // New: Clipboard state
+  clipboard: CanvasObject[]
+  setClipboard: (objects: CanvasObject[]) => void
+
+  // New: Live text editing
+  liveTextContent: Record<string, string>
+  updateLiveText: (objectId: string, content: string) => void
+
+  // New: Cursor chat bubbles
+  cursorChatBubbles: Record<string, { content: string, expiresAt: number }>
+  showCursorChatBubble: (userId: string, content: string, duration: number) => void
+
+  // New: Note properties
+  noteProperties: {
+    backgroundType: 'plain' | 'striped' | 'grid' | 'none'
+    backgroundColor: string
+    fontFamily: string
+    fontSize: number
+    cornerRadius: number
+  }
+  setNoteProperties: (props: Partial<HaloboardState['noteProperties']>) => void
+
+  // New: Text properties
+  textProperties: {
+    fontFamily: string
+    fontSize: number
+    fontWeight: string
+    color: string
+    alignment: 'left' | 'center' | 'right'
+  }
+  setTextProperties: (props: Partial<HaloboardState['textProperties']>) => void
+
+  // New: Apply transform delta
+  applyTransformDelta: (objectId: string, delta: any, isRemote?: boolean) => void
 
   zoom: number
   panX: number
@@ -286,6 +320,57 @@ export const useHaloboardStore = create<HaloboardState>()(
       activeLayerId: "layer-1",
       selectedIds: [],
       clipboard: [],
+
+      // New live text state
+      liveTextContent: {},
+      updateLiveText: (objectId, content) => set((state) => ({
+        liveTextContent: { ...state.liveTextContent, [objectId]: content }
+      })),
+
+      // New cursor chat bubbles
+      cursorChatBubbles: {},
+      showCursorChatBubble: (userId, content, duration) => set((state) => ({
+        cursorChatBubbles: {
+          ...state.cursorChatBubbles,
+          [userId]: { content, expiresAt: Date.now() + duration }
+        }
+      })),
+
+      // New note properties
+      noteProperties: {
+        backgroundType: 'plain',
+        backgroundColor: '#FFFF88',
+        fontFamily: 'Inter',
+        fontSize: 14,
+        cornerRadius: 8
+      },
+      setNoteProperties: (props) => set((state) => ({
+        noteProperties: { ...state.noteProperties, ...props }
+      })),
+
+      // New text properties
+      textProperties: {
+        fontFamily: 'Arial',
+        fontSize: 16,
+        fontWeight: 'normal',
+        color: '#000000',
+        alignment: 'left'
+      },
+      setTextProperties: (props) => set((state) => ({
+        textProperties: { ...state.textProperties, ...props }
+      })),
+
+      // New transform delta application
+      applyTransformDelta: (objectId, delta, isRemote = false) => set((state) => {
+        const updatedObjects = state.objects.map(obj =>
+          obj.id === objectId ? { ...obj, transform: { ...obj.transform, ...delta } } : obj
+        )
+        if (!isRemote) {
+          const manager = getCollaborationManager()
+          if (manager) manager.broadcastTransformDelta(objectId, delta)
+        }
+        return { objects: updatedObjects }
+      }),
       
       history: [{ objects: [], layers: [{ id: "layer-1", name: "Layer 1", opacity: 1, blendMode: "normal", visible: true, locked: false, objectIds: [] }] }],
       historyIndex: 0,
@@ -311,17 +396,17 @@ export const useHaloboardStore = create<HaloboardState>()(
       users: [{ id: initialUserId, name: "Me", color: generateColor(), avatar: "/placeholder-user.jpg", lastActive: Date.now(), isAdmin: true }],
       currentUserId: initialUserId,
       
-      updateUserCursor: (userId, position, name, color) => set((state) => {
+      updateUserCursor: (userId, position, name, color, tool) => set((state) => {
          const existingUser = state.users.find(u => u.id === userId)
-         
+
          if (existingUser) {
             return {
-                users: state.users.map(u => u.id === userId ? { ...u, cursor: position, lastActive: Date.now() } : u)
+                users: state.users.map(u => u.id === userId ? { ...u, cursor: position, lastActive: Date.now(), tool } : u)
             }
          } else {
             get().addNotification(`${name || "Someone"} joined!`)
             return {
-                users: [...state.users, { id: userId, name: name || "Guest", color: color || "#999", avatar: "/placeholder-user.jpg", cursor: position, lastActive: Date.now() }]
+                users: [...state.users, { id: userId, name: name || "Guest", color: color || "#999", avatar: "/placeholder-user.jpg", cursor: position, lastActive: Date.now(), tool }]
             }
          }
       }),
@@ -634,6 +719,7 @@ export const useHaloboardStore = create<HaloboardState>()(
       },
 
       duplicate: () => { const state = get(); state.copy(); state.paste() },
+      setClipboard: (objects) => set({ clipboard: objects }),
       undo: (isRemote = false) => {
         set((state) => { if (state.historyIndex > 0) { const prevStep = state.history[state.historyIndex - 1]; return { objects: prevStep.objects, layers: prevStep.layers, historyIndex: state.historyIndex - 1 } } return state })
         get().saveCurrentProject()
@@ -740,6 +826,8 @@ export const useHaloboardStore = create<HaloboardState>()(
         isProjectMinimized: state.isProjectMinimized,
         activeView: state.activeView,
         currentUserId: state.currentUserId,
+        noteProperties: state.noteProperties,
+        textProperties: state.textProperties,
         kickedProjectIds: state.kickedProjectIds
       }),
     }

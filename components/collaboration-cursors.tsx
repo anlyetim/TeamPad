@@ -2,9 +2,30 @@
 
 import { useEffect, useState } from "react"
 import { useHaloboardStore } from "@/lib/store"
-import { MousePointer2, Crown } from "lucide-react"
+import { MousePointer2, Crown, Brush, Eraser, Type, Shapes, StickyNote, Image, MessageCircle } from "lucide-react"
 import { getCollaborationManager } from "@/lib/collaboration"
-import type { Point } from "@/lib/types"
+import type { Point, ToolType } from "@/lib/types"
+
+function getCursorIcon(tool?: ToolType) {
+  switch (tool) {
+    case 'brush':
+      return Brush
+    case 'eraser':
+      return Eraser
+    case 'text':
+      return Type
+    case 'shape':
+      return Shapes
+    case 'note':
+      return StickyNote
+    case 'image':
+      return Image
+    case 'comment':
+      return MessageCircle
+    default:
+      return MousePointer2
+  }
+}
 
 export function CollaborationCursors() {
   const { users, currentUserId, zoom, panX, panY } = useHaloboardStore()
@@ -49,13 +70,22 @@ export function CollaborationCursors() {
         >
           {/* Cursor Icon with Admin Indicator */}
           <div className="relative">
-            <MousePointer2 className="size-5 drop-shadow-md" style={{ color: user.color, fill: user.color }} />
-            {user.isAdmin && (
-              <Crown
-                className="absolute -top-1 -right-1 size-3 drop-shadow-md"
-                style={{ color: "#FFD700", fill: "#FFD700" }}
-              />
-            )}
+            {(() => {
+              const IconComponent = getCursorIcon(user.tool)
+              const isAdmin = user.isAdmin
+              const cursorColor = isAdmin ? "#FFD700" : user.color
+              return (
+                <>
+                  <IconComponent className="size-5 drop-shadow-md" style={{ color: cursorColor, fill: cursorColor }} />
+                  {isAdmin && (
+                    <Crown
+                      className="absolute -top-1 -right-1 size-3 drop-shadow-md"
+                      style={{ color: "#FFD700", fill: "#FFD700" }}
+                    />
+                  )}
+                </>
+              )
+            })()}
           </div>
 
           {/* User Name Label */}
@@ -65,6 +95,21 @@ export function CollaborationCursors() {
           >
             {user.name}
           </div>
+
+          {/* Chat Bubble */}
+          {showBubble && (
+            <div
+              className="absolute bg-white border border-gray-300 rounded-lg px-3 py-2 shadow-lg text-sm max-w-xs animate-fade-in"
+              style={{
+                left: `${user.cursor!.x * zoom + panX + 20}px`,
+                top: `${user.cursor!.y * zoom + panY - 30}px`,
+              }}
+            >
+              {bubble.content}
+              <div className="absolute w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-white"
+                   style={{ left: '10px', bottom: '-4px' }} />
+            </div>
+          )}
         </div>
       ))}
     </>

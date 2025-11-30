@@ -143,6 +143,7 @@ export interface User {
   cursor?: Point
   lastActive?: number
   isAdmin?: boolean
+  tool?: ToolType
 }
 
 export interface ChatMessage {
@@ -181,7 +182,7 @@ export interface CanvasState {
 
 // Collaboration Types
 export type BroadcastMessage =
-  | { type: "CURSOR_MOVE"; userId: string; userName: string; userColor: string; position: Point }
+  | { type: "CURSOR_MOVE"; userId: string; userName: string; userColor: string; position: Point; tool?: ToolType }
   | { type: "OBJECT_UPDATE"; object: CanvasObject }
   | { type: "OBJECT_DELETE"; objectId: string }
   | { type: "LAYER_UPDATE"; layer: Layer }

@@ -80,7 +80,7 @@ export class CollaborationManager {
     
     switch (message.type) {
       case "CURSOR_MOVE":
-        store.updateUserCursor(message.userId, message.position, message.userName, message.userColor)
+        store.updateUserCursor(message.userId, message.position, message.userName, message.userColor, message.tool)
         break
       case "OBJECT_UPDATE":
         store.updateObject(message.object.id, message.object, true)
@@ -104,15 +104,53 @@ export class CollaborationManager {
         break
       case "CHAT_MESSAGE":
         store.addChatMessage(message.message, true)
+        // New: Trigger chat bubble for 3 seconds
+        store.showCursorChatBubble(message.userId, message.message.content, 3000)
+        break
+      case "TEXT_LIVE":
+        // New: Update live text content for remote users
+        if (message.objectId && message.content !== undefined) {
+          store.updateLiveText(message.objectId, message.content)
+        }
+        break
+      case "TEXT_COMMIT":
+        // New: Commit final text object
+        if (message.object && message.objectId) {
+          store.updateObject(message.objectId, message.object, true)
+        }
+        break
+      case "NOTE_CREATE":
+        // New: Create note object
+        if (message.object) {
+          store.addObject(message.object, true)
+        }
+        break
+      case "OBJECT_TRANSFORM":
+        // New: Apply transform delta
+        if (message.objectId && message.delta) {
+          store.applyTransformDelta(message.objectId, message.delta, true)
+        }
         break
       case "USER_JOIN":
         store.addUser(message.user)
         this.broadcastUserJoin()
+        // Broadcast cursor for all existing users (even without cursor positions)
         const boardState = useHaloboardStore.getState()
-        const hostUser = boardState.users.find(u => u.id === this.userId)
-        if (hostUser && hostUser.cursor) {
-          this.broadcastCursor(hostUser.cursor)
-        }
+        boardState.users.forEach(user => {
+          if (user.id !== message.user.id) {
+            // Use current cursor position, or center of canvas as default
+            const cursorPosition = user.cursor || { x: 960, y: 540 } // Default center position
+            const msg: BroadcastMessage = {
+              type: "CURSOR_MOVE",
+              userId: user.id,
+              userName: user.name,
+              userColor: user.color,
+              position: cursorPosition,
+              tool: user.tool
+            }
+            this.broadcastMessage(msg)
+          }
+        })
         break
       case "USER_LEAVE":
         store.removeUser(message.userId)
@@ -248,10 +286,13 @@ export class CollaborationManager {
                      timestamp: Date.now()
                  }));
 
-                 await updateDoc(projectRef, {
-                     messages: messagesWithTimestamp,
-                     lastUpdated: Date.now()
-                 });
+                const updateData: any = {
+                    lastUpdated: Date.now()
+                };
+                if (messagesWithTimestamp && messagesWithTimestamp.length > 0) {
+                    updateData.messages = messagesWithTimestamp;
+                }
+                await updateDoc(projectRef, updateData);
              } catch (error) {
                  console.error("Failed to send messages to Firebase:", error);
                  this.messageQueue.unshift(...messages);
@@ -268,11 +309,16 @@ export class CollaborationManager {
     this.saveTimeout = setTimeout(async () => {
         const projectRef = doc(db, "projects", this.projectId);
         try {
-            await updateDoc(projectRef, {
-                objects: state.objects,
-                layers: state.layers,
+            const updateData: any = {
                 lastUpdated: Date.now()
-            });
+            };
+            if (state.objects !== undefined) {
+                updateData.objects = state.objects;
+            }
+            if (state.layers !== undefined) {
+                updateData.layers = state.layers;
+            }
+            await updateDoc(projectRef, updateData);
         } catch (e) {
             console.error("Failed to save project state to Cloud:", e);
         }
@@ -291,10 +337,10 @@ export class CollaborationManager {
 
   public broadcastCursor(position: Point) {
     const now = Date.now();
-    if (now - this.lastCursorBroadcast < 30) return; 
+    if (now - this.lastCursorBroadcast < 30) return;
     this.lastCursorBroadcast = now;
 
-    const { users, currentUserId } = useHaloboardStore.getState()
+    const { users, currentUserId, activeTool } = useHaloboardStore.getState()
     const me = users.find(u => u.id === currentUserId)
     if (!me) return
 
@@ -305,7 +351,8 @@ export class CollaborationManager {
         userId: this.userId,
         userName: me.name,
         userColor: me.color,
-        position
+        position,
+        tool: activeTool
     }
 
     this.broadcastMessage(msg)
@@ -371,6 +418,26 @@ export class CollaborationManager {
     } else {
       this.broadcastChannel?.postMessage(msg)
     }
+  }
+
+  public broadcastTextLive(objectId: string, content: string) {
+    const msg: BroadcastMessage = { type: "TEXT_LIVE", objectId, content }
+    this.broadcastMessage(msg)
+  }
+
+  public broadcastTextCommit(object: CanvasObject) {
+    const msg: BroadcastMessage = { type: "TEXT_COMMIT", objectId: object.id, object }
+    this.broadcastMessage(msg)
+  }
+
+  public broadcastNoteCreate(object: CanvasObject) {
+    const msg: BroadcastMessage = { type: "NOTE_CREATE", object }
+    this.broadcastMessage(msg)
+  }
+
+  public broadcastTransformDelta(objectId: string, delta: any) {
+    const msg: BroadcastMessage = { type: "OBJECT_TRANSFORM", objectId, delta }
+    this.broadcastMessage(msg)
   }
 
   public disconnect() {
