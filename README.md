@@ -305,7 +305,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **🌐 Website**: [teampad.vercel.app](https://teampad.vercel.app)
 - **🐛 Issues**: [GitHub Issues](https://github.com/anlyetim/TeamPad/issues)
-- **📧 Email**: [Your Email]
+- **📧 Email**: [anil.yetim@proton.me]
 
 ---
 
