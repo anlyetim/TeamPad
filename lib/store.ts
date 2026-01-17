@@ -1,7 +1,9 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { CanvasObject, Layer, User, ChatMessage, ToolType, BrushSettings, ShapeSettings, HistoryStep, CanvasSettings, Keybindings, Language, GridType, Project, Point } from "./types"
+import type { CanvasObject, Layer, User, ChatMessage, ToolType, BrushSettings, ShapeSettings, HistoryStep, CanvasSettings, Keybindings, Language, GridType, Project, Point, ToolProperties } from "./types"
 import { getCollaborationManager } from "./collaboration"
+import { getEditorRuntime } from "./editorRuntime"
+import { getLayerManager } from "./LayerManager"
 
 const generateKey = () => {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
@@ -36,15 +38,15 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
 }
 
 interface Notification {
-    id: string
-    message: string
-    type: 'info' | 'success'
+  id: string
+  message: string
+  type: 'info' | 'success'
 }
 
 interface HaloboardState {
   activeView: "dashboard" | "canvas"
   setActiveView: (view: "dashboard" | "canvas") => void
-  
+
   isProjectMinimized: boolean
   setIsProjectMinimized: (minimized: boolean) => void
   isOwner: boolean // New state to track ownership
@@ -82,7 +84,7 @@ interface HaloboardState {
   showTransformHandles: boolean
   maxUndoSteps: number
   highlightColor: string
-  
+
   language: Language
   setLanguage: (lang: Language) => void
 
@@ -93,13 +95,14 @@ interface HaloboardState {
   activeTool: ToolType
   brushSettings: BrushSettings
   shapeSettings: ShapeSettings
+  toolProperties: ToolProperties
 
   users: User[]
   currentUserId: string
   updateUserCursor: (userId: string, position: Point, name?: string, color?: string, tool?: ToolType) => void
 
   chatMessages: ChatMessage[]
-  addChatMessage: (message: ChatMessage, isRemote?: boolean) => void
+  addChatMessage: (content: string, isRemote?: boolean) => void
 
   // New: Clipboard state
   clipboard: CanvasObject[]
@@ -147,8 +150,9 @@ interface HaloboardState {
   setActiveTool: (tool: ToolType) => void
   setBrushSettings: (settings: Partial<BrushSettings>) => void
   setShapeSettings: (settings: Partial<ShapeSettings>) => void
+  setToolProperties: (settings: Partial<ToolProperties>) => void
   setActiveLayer: (layerId: string) => void
-  
+
   setShowGrid: (show: boolean) => void
   setShowTransformHandles: (show: boolean) => void
   setMaxUndoSteps: (steps: number) => void
@@ -160,18 +164,21 @@ interface HaloboardState {
   addObject: (object: CanvasObject, isRemote?: boolean) => void
   updateObject: (id: string, updates: Partial<CanvasObject>, isRemote?: boolean) => void
   deleteObject: (id: string, isRemote?: boolean) => void
-  
+
   setSelectedIds: (ids: string[]) => void
   addLayer: (name: string, isRemote?: boolean) => void
   updateLayer: (id: string, updates: Partial<Layer>, isRemote?: boolean) => void
   deleteLayer: (id: string, isRemote?: boolean) => void
-  
+
+  // Layer management
   moveLayer: (id: string, direction: 'up' | 'down') => void
   reorderLayer: (fromIndex: number, toIndex: number) => void
+  generateLayerThumbnail: (layerId: string) => void
+  setLayerColorTag: (layerId: string, colorTag: string) => void
   moveObjectToLayer: (objectId: string, targetLayerId: string) => void
-  reorderObject: (objectId: string, direction: 'up' | 'down') => void 
+  reorderObject: (objectId: string, direction: 'up' | 'down') => void
   reorderObjectInLayer: (objectId: string, targetLayerId: string, newIndex: number) => void
-  
+
   copy: () => void
   paste: () => void
   duplicate: () => void
@@ -189,7 +196,7 @@ interface HaloboardState {
   setIsPanning: (isPanning: boolean) => void
   togglePropertiesPanel: () => void
   toggleChat: () => void
-  maxUsers: number; 
+  maxUsers: number;
   setMaxUsers: (n: number) => void;
   kickedProjectIds?: string[];
 }
@@ -203,7 +210,7 @@ export const useHaloboardStore = create<HaloboardState>()(
       setActiveView: (view) => set({ activeView: view, isProjectMinimized: view === "dashboard" }),
       isProjectMinimized: true,
       setIsProjectMinimized: (minimized) => set({ isProjectMinimized: minimized, activeView: minimized ? "dashboard" : "canvas" }),
-      isOwner: true, 
+      isOwner: true,
       isOnline: false,
 
       projects: [],
@@ -211,9 +218,9 @@ export const useHaloboardStore = create<HaloboardState>()(
 
       notifications: [],
       addNotification: (message) => {
-          const id = Math.random().toString(36).substr(2, 9)
-          set(state => ({ notifications: [...state.notifications, { id, message, type: 'info' }] }))
-          setTimeout(() => get().removeNotification(id), 5000)
+        const id = Math.random().toString(36).substr(2, 9)
+        set(state => ({ notifications: [...state.notifications, { id, message, type: 'info' }] }))
+        setTimeout(() => get().removeNotification(id), 5000)
       },
       removeNotification: (id) => set(state => ({ notifications: state.notifications.filter(n => n.id !== id) })),
 
@@ -222,7 +229,7 @@ export const useHaloboardStore = create<HaloboardState>()(
         if (kickedProjectIds.includes(code)) {
           get().addNotification("You have been removed from this project.");
           set({ activeView: "dashboard", currentProjectId: null });
-          return; 
+          return;
         }
         if (get().users.length >= get().maxUsers) {
           get().addNotification("The project is currently at maximum user capacity.")
@@ -260,9 +267,9 @@ export const useHaloboardStore = create<HaloboardState>()(
             canvasSettings: state.canvasSettings
           }
         }
-        
+
         set((state) => ({
-            projects: [currentProject, ...state.projects.filter(p => p.id !== currentProject.id)]
+          projects: [currentProject, ...state.projects.filter(p => p.id !== currentProject.id)]
         }))
       },
 
@@ -290,7 +297,7 @@ export const useHaloboardStore = create<HaloboardState>()(
           currentProjectId: newId,
           activeView: "canvas",
           isProjectMinimized: false,
-          isOwner: true, 
+          isOwner: true,
           isOnline: isOnline,
           canvasSettings: settings,
           objects: [],
@@ -306,7 +313,7 @@ export const useHaloboardStore = create<HaloboardState>()(
       deleteProject: (id) => set((state) => ({ projects: state.projects.filter(p => p.id !== id) })),
 
       projectKey: generateKey(),
-      
+
       canvasSettings: {
         projectName: "Untitled Project",
         infinite: true,
@@ -339,10 +346,10 @@ export const useHaloboardStore = create<HaloboardState>()(
       // New note properties
       noteProperties: {
         backgroundType: 'plain',
-        backgroundColor: '#FFFF88',
+        backgroundColor: '#FFF2CC',
         fontFamily: 'Inter',
         fontSize: 14,
-        cornerRadius: 8
+        cornerRadius: 12
       },
       setNoteProperties: (props) => set((state) => ({
         noteProperties: { ...state.noteProperties, ...props }
@@ -371,7 +378,7 @@ export const useHaloboardStore = create<HaloboardState>()(
         }
         return { objects: updatedObjects }
       }),
-      
+
       history: [{ objects: [], layers: [{ id: "layer-1", name: "Layer 1", opacity: 1, blendMode: "normal", visible: true, locked: false, objectIds: [] }] }],
       historyIndex: 0,
 
@@ -381,7 +388,7 @@ export const useHaloboardStore = create<HaloboardState>()(
       showTransformHandles: true,
       maxUndoSteps: 50,
       highlightColor: "#0A84FF",
-      
+
       language: "en",
       setLanguage: (lang) => set({ language: lang }),
 
@@ -390,34 +397,41 @@ export const useHaloboardStore = create<HaloboardState>()(
       resetKeybindings: () => set({ keybindings: DEFAULT_KEYBINDINGS }),
 
       activeTool: "select",
-      brushSettings: { size: 5, opacity: 1, softness: 0.5, color: "#000000", eraserMode: "object" },
+      brushSettings: { size: 5, opacity: 1, softness: 0.5, color: "#000000", eraserMode: "object", spacing: 0.1, hardness: 0.9 },
       shapeSettings: { shapeType: "rectangle", fillColor: "#E0E0E0", strokeColor: "#000000", strokeWidth: 2, borderType: "solid", opacity: 1 },
+      toolProperties: { opacity: 1, blendMode: "normal" },
 
       users: [{ id: initialUserId, name: "Me", color: generateColor(), avatar: "/placeholder-user.jpg", lastActive: Date.now(), isAdmin: true }],
       currentUserId: initialUserId,
-      
-      updateUserCursor: (userId, position, name, color, tool) => set((state) => {
-         const existingUser = state.users.find(u => u.id === userId)
 
-         if (existingUser) {
-            return {
-                users: state.users.map(u => u.id === userId ? { ...u, cursor: position, lastActive: Date.now(), tool } : u)
-            }
-         } else {
-            get().addNotification(`${name || "Someone"} joined!`)
-            return {
-                users: [...state.users, { id: userId, name: name || "Guest", color: color || "#999", avatar: "/placeholder-user.jpg", cursor: position, lastActive: Date.now(), tool }]
-            }
-         }
+      updateUserCursor: (userId, position, name, color, tool) => set((state) => {
+        const existingUser = state.users.find(u => u.id === userId)
+
+        if (existingUser) {
+          return {
+            users: state.users.map(u => u.id === userId ? { ...u, cursor: position, lastActive: Date.now(), tool } : u)
+          }
+        } else {
+          get().addNotification(`${name || "Someone"} joined!`)
+          return {
+            users: [...state.users, { id: userId, name: name || "Guest", color: color || "#999", avatar: "/placeholder-user.jpg", cursor: position, lastActive: Date.now(), tool }]
+          }
+        }
       }),
 
       chatMessages: [],
-      addChatMessage: (message, isRemote = false) => {
-          set((state) => ({ chatMessages: [...state.chatMessages, message] }))
-          if (!isRemote) {
-              const manager = getCollaborationManager()
-              if (manager) manager.broadcastChat(message)
-          }
+      addChatMessage: (content, isRemote = false) => {
+        const message: ChatMessage = {
+          id: generateKey(),
+          userId: get().currentUserId || 'anon',
+          content,
+          timestamp: Date.now()
+        }
+        set((state) => ({ chatMessages: [...state.chatMessages, message] }))
+        if (!isRemote) {
+          const manager = getCollaborationManager()
+          if (manager) manager.broadcastChat(content)
+        }
       },
 
       zoom: 1,
@@ -430,12 +444,13 @@ export const useHaloboardStore = create<HaloboardState>()(
 
       setProjectKey: (key) => set({ projectKey: key }),
       setCanvasSettings: (settings) => {
-         set((state) => ({ canvasSettings: { ...state.canvasSettings, ...settings } }))
-         get().saveCurrentProject()
+        set((state) => ({ canvasSettings: { ...state.canvasSettings, ...settings } }))
+        get().saveCurrentProject()
       },
       setActiveTool: (tool) => set({ activeTool: tool }),
       setBrushSettings: (settings) => set((state) => ({ brushSettings: { ...state.brushSettings, ...settings } })),
       setShapeSettings: (settings) => set((state) => ({ shapeSettings: { ...state.shapeSettings, ...settings } })),
+      setToolProperties: (settings) => set((state) => ({ toolProperties: { ...state.toolProperties, ...settings } })),
       setActiveLayer: (layerId) => set({ activeLayerId: layerId }),
 
       setShowGrid: (show) => set({ showGrid: show }),
@@ -465,7 +480,7 @@ export const useHaloboardStore = create<HaloboardState>()(
             return layer
           })
           const newObjects = [...state.objects, { ...object, layerId: state.activeLayerId }]
-          
+
           const newHistory = state.history.slice(0, state.historyIndex + 1)
           newHistory.push(createHistoryStep(newObjects, updatedLayers, "Add object"))
           if (newHistory.length > state.maxUndoSteps) newHistory.shift()
@@ -473,13 +488,16 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { objects: newObjects, layers: updatedLayers, history: newHistory, historyIndex: newHistory.length - 1 }
         })
         get().saveCurrentProject()
-        
+
+        // Sync with EditorRuntime for hit testing
+        getEditorRuntime().addObject(object, true)
+
         if (!isRemote) {
-            const manager = getCollaborationManager()
-            if (manager) {
-              manager.broadcastObject(object)
-              manager.saveProject(get()) // Fix: Save state to cloud
-            }
+          const manager = getCollaborationManager()
+          if (manager) {
+            manager.broadcastObjectCommit(object) // Fixed method name
+            manager.saveProject(get())
+          }
         }
       },
 
@@ -491,17 +509,20 @@ export const useHaloboardStore = create<HaloboardState>()(
           const newObjects = state.objects.map((o) => (o.id === id ? { ...o, ...updates } : o))
           return { objects: newObjects }
         })
-        
+
+        // Sync with EditorRuntime
+        getEditorRuntime().updateObject(id, updates, true)
+
         if (!isRemote) {
-           const state = get()
-           const updatedObj = state.objects.find(o => o.id === id)
-           if (updatedObj) {
-               const manager = getCollaborationManager()
-               if (manager) {
-                 manager.broadcastObject(updatedObj)
-                 manager.saveProject(state) // Fix: Save state to cloud
-               }
-           }
+          const state = get()
+          const updatedObj = state.objects.find(o => o.id === id)
+          if (updatedObj) {
+            const manager = getCollaborationManager()
+            if (manager) {
+              manager.broadcastObjectCommit(updatedObj) // Fixed method name
+              manager.saveProject(state)
+            }
+          }
         }
       },
 
@@ -516,12 +537,15 @@ export const useHaloboardStore = create<HaloboardState>()(
         })
         get().saveCurrentProject()
 
+        // Sync with EditorRuntime
+        getEditorRuntime().deleteObject(id, true)
+
         if (!isRemote) {
-            const manager = getCollaborationManager()
-            if (manager) {
-              manager.broadcastDelete(id)
-              manager.saveProject(get()) // Fix: Save state to cloud
-            }
+          const manager = getCollaborationManager()
+          if (manager) {
+            manager.broadcastObjectDelete(id) // Fixed method name
+            manager.saveProject(get())
+          }
         }
       },
 
@@ -529,7 +553,19 @@ export const useHaloboardStore = create<HaloboardState>()(
 
       addLayer: (name, isRemote = false) => {
         const newId = `layer-${Date.now()}`
-        const newLayer: Layer = { id: newId, name: name || `Layer ${get().layers.length + 1}`, opacity: 1, blendMode: "normal", visible: true, locked: false, objectIds: [] }
+        const newLayer: Layer = {
+          id: newId,
+          name: name || `Layer ${get().layers.length + 1}`,
+          opacity: 1,
+          blendMode: "normal",
+          visible: true,
+          locked: false,
+          objectIds: [],
+          colorTag: 'none',
+          thumbnail: undefined,
+          isGroup: false,
+          collapsed: false
+        }
 
         set((state) => {
           const newLayers = [newLayer, ...state.layers]
@@ -541,11 +577,11 @@ export const useHaloboardStore = create<HaloboardState>()(
         get().saveCurrentProject()
 
         if (!isRemote) {
-            const manager = getCollaborationManager()
-            if (manager) {
-                manager.broadcastLayer(newLayer)
-                manager.saveProject(get()) // Fix: Save state to cloud
-            }
+          const manager = getCollaborationManager()
+          if (manager) {
+            manager.broadcastLayer(newLayer)
+            manager.saveProject(get()) // Fix: Save state to cloud
+          }
         }
       },
 
@@ -557,14 +593,14 @@ export const useHaloboardStore = create<HaloboardState>()(
         get().saveCurrentProject()
 
         if (!isRemote) {
-            const manager = getCollaborationManager()
-            if (manager) {
-                const updatedLayer = get().layers.find(l => l.id === id)
-                if (updatedLayer) {
-                  manager.broadcastLayer(updatedLayer)
-                  manager.saveProject(get()) // Fix: Save state to cloud
-                }
+          const manager = getCollaborationManager()
+          if (manager) {
+            const updatedLayer = get().layers.find(l => l.id === id)
+            if (updatedLayer) {
+              manager.broadcastLayer(updatedLayer)
+              manager.saveProject(get()) // Fix: Save state to cloud
             }
+          }
         }
       },
 
@@ -582,11 +618,11 @@ export const useHaloboardStore = create<HaloboardState>()(
         get().saveCurrentProject()
 
         if (!isRemote) {
-            const manager = getCollaborationManager()
-            if (manager) {
-              manager.broadcastLayerDelete(id)
-              manager.saveProject(get()) // Fix: Save state to cloud
-            }
+          const manager = getCollaborationManager()
+          if (manager) {
+            manager.broadcastLayerDelete(id)
+            manager.saveProject(get()) // Fix: Save state to cloud
+          }
         }
       },
 
@@ -599,7 +635,7 @@ export const useHaloboardStore = create<HaloboardState>()(
           return { layers: newLayers }
         })
         get().saveCurrentProject()
-        
+
         // Save move
         const manager = getCollaborationManager()
         if (manager && get().isOnline) manager.saveProject(get())
@@ -617,6 +653,26 @@ export const useHaloboardStore = create<HaloboardState>()(
         // Save reorder
         const manager = getCollaborationManager()
         if (manager && get().isOnline) manager.saveProject(get())
+      },
+
+      generateLayerThumbnail: (layerId) => {
+        const state = get()
+        const layer = state.layers.find(l => l.id === layerId)
+        if (!layer) return
+
+        const layerManager = getLayerManager()
+        const thumbnail = layerManager.generateThumbnail(
+          layer,
+          state.objects,
+          state.canvasSettings.width,
+          state.canvasSettings.height
+        )
+
+        get().updateLayer(layerId, { thumbnail })
+      },
+
+      setLayerColorTag: (layerId, colorTag) => {
+        get().updateLayer(layerId, { colorTag: colorTag as any })
       },
 
       moveObjectToLayer: (objectId, targetLayerId) => {
@@ -705,7 +761,7 @@ export const useHaloboardStore = create<HaloboardState>()(
             pastedIds.push(newId)
           })
           const updatedLayers = state.layers.map(layer => {
-            if (layer.id === state.activeLayerId) return { ...layer, objectIds: [ ...pastedIds, ...layer.objectIds] }
+            if (layer.id === state.activeLayerId) return { ...layer, objectIds: [...pastedIds, ...layer.objectIds] }
             return layer
           })
           const finalObjects = [...state.objects, ...newObjects]
@@ -764,8 +820,8 @@ export const useHaloboardStore = create<HaloboardState>()(
         })
 
         if (!isRemote) {
-            const manager = getCollaborationManager()
-            if (manager) manager.broadcastHistory(step)
+          const manager = getCollaborationManager()
+          if (manager) manager.broadcastHistory(step)
         }
       },
 
@@ -779,25 +835,25 @@ export const useHaloboardStore = create<HaloboardState>()(
         return { users: [...state.users, user] }
       }),
       updateUser: (id, updates) => set((state) => ({ users: state.users.map((user) => (user.id === id ? { ...user, ...updates } : user)) })),
-      
+
       removeUser: (id, isKick = false) => {
-          set((state) => ({ users: state.users.filter((user) => user.id !== id) }))
-          if (isKick) {
-              const manager = getCollaborationManager()
-              if (manager) manager.broadcastKick(id)
-              // Mark project as kicked for the removed user locally if it's the current user
-              const currentUserId = get().currentUserId
-              const currentProjectId = get().currentProjectId
-              if (id === currentUserId && currentProjectId) {
-                set((state) => ({
-                  kickedProjectIds: [...(state.kickedProjectIds || []), currentProjectId],
-                  // remove the project from the local projects array
-                  projects: state.projects.filter(p => p.id !== currentProjectId)
-                }))
-                set({ activeView: "dashboard", currentProjectId: null })
-                get().addNotification("You have been removed from this project.")
-              }
+        set((state) => ({ users: state.users.filter((user) => user.id !== id) }))
+        if (isKick) {
+          const manager = getCollaborationManager()
+          if (manager) manager.broadcastKick(id)
+          // Mark project as kicked for the removed user locally if it's the current user
+          const currentUserId = get().currentUserId
+          const currentProjectId = get().currentProjectId
+          if (id === currentUserId && currentProjectId) {
+            set((state) => ({
+              kickedProjectIds: [...(state.kickedProjectIds || []), currentProjectId],
+              // remove the project from the local projects array
+              projects: state.projects.filter(p => p.id !== currentProjectId)
+            }))
+            set({ activeView: "dashboard", currentProjectId: null })
+            get().addNotification("You have been removed from this project.")
           }
+        }
       },
 
       setZoom: (zoom) => set({ zoom: Math.max(0.1, Math.min(zoom, 5)) }),

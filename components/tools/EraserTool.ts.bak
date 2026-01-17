@@ -1,0 +1,231 @@
+// components/tools/EraserTool.ts - GIMP-style eraser with alpha channel support
+import type { ToolHandler, ToolContext } from '@/lib/toolRegistry'
+import type { Point, CanvasObject, PathData } from '@/lib/types'
+import { useHaloboardStore } from '@/lib/store'
+import { getEditorRuntime } from '@/lib/editorRuntime'
+import { getBrushEngine, type BrushStampSettings } from './core/GIMPBrushEngine'
+
+interface EraserState {
+    isErasing: boolean
+    points: Point[]
+}
+
+const state: EraserState = {
+    isErasing: false,
+    points: []
+}
+
+export const EraserTool: ToolHandler = {
+    name: 'eraser',
+    cursor: 'none', // Custom eraser cursor
+
+    onActivate: (ctx: ToolContext) => {
+        state.isErasing = false
+        state.points = []
+    },
+
+    onDeactivate: (ctx: ToolContext) => {
+        state.isErasing = false
+        state.points = []
+    },
+
+    onMouseDown: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        state.isErasing = true
+        state.points = [point]
+        performErase(point, ctx)
+    },
+
+    onMouseMove: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        if (!state.isErasing) return
+
+        const store = useHaloboardStore.getState()
+        const lastPoint = state.points[state.points.length - 1]
+
+        if (lastPoint) {
+            const distance = Math.sqrt(
+                (point.x - lastPoint.x) ** 2 + (point.y - lastPoint.y) ** 2
+            )
+
+            // Spacing for continuous erasing
+            const spacing = store.brushSettings.spacing || 0.1
+            const minDistance = Math.max(0.5, (store.brushSettings.size / ctx.zoom) * spacing * 0.25)
+
+            if (distance >= minDistance) {
+                state.points.push(point)
+                performErase(point, ctx)
+            }
+        }
+    },
+
+    onMouseUp: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        state.isErasing = false
+        state.points = []
+    },
+
+    getCursor: (point: Point, ctx: ToolContext) => {
+        return 'none'
+    },
+
+    renderOverlay: (ctx: CanvasRenderingContext2D, toolCtx: ToolContext) => {
+        const store = useHaloboardStore.getState()
+        const { brushSettings } = store
+
+        // Draw current erase stroke preview
+        if (state.isErasing && state.points.length > 0) {
+            const brushEngine = getBrushEngine()
+
+            const stampSettings: BrushStampSettings = {
+                size: brushSettings.size,
+                hardness: brushSettings.hardness,
+                opacity: 0.5, // Semi-transparent preview
+                spacing: brushSettings.spacing || 0.25,
+                angle: 0,
+                aspectRatio: 1.0,
+                color: '#FF0000' // Red preview for eraser
+            }
+
+            ctx.save()
+            ctx.globalCompositeOperation = 'source-over'
+
+            // Render preview stroke
+            brushEngine.renderStroke(ctx, state.points, stampSettings)
+
+            ctx.restore()
+        }
+    }
+}
+
+/**
+ * Perform erasing at a specific point
+ * GIMP-style: Uses alpha channel compositing for proper erasing
+ */
+function performErase(point: Point, ctx: ToolContext) {
+    const store = useHaloboardStore.getState()
+    const { brushSettings, objects, updateObject, layers } = store
+    const runtime = getEditorRuntime()
+
+    if (brushSettings.eraserMode === 'partial') {
+        // GIMP-style partial eraser: Add erase paths with proper coordinate transformation
+        const eraserRadius = brushSettings.size / 2
+
+        // Find path objects that might be affected
+        const pathObjects = objects.filter(obj => {
+            if (obj.type !== 'path') return false
+            const layer = layers.find(l => l.id === obj.layerId)
+            if (!layer?.visible || layer.locked) return false
+
+            // Quick bounding box check
+            const data = obj.data as PathData
+            if (data.points.length === 0) return false
+
+            // Calculate bounding box in world space
+            const xs = data.points.map(p => p.x + obj.transform.x)
+            const ys = data.points.map(p => p.y + obj.transform.y)
+            const minX = Math.min(...xs) - eraserRadius
+            const maxX = Math.max(...xs) + eraserRadius
+            const minY = Math.min(...ys) - eraserRadius
+            const maxY = Math.max(...ys) + eraserRadius
+
+            return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
+        })
+
+        // Apply erase to each affected path
+        pathObjects.forEach(obj => {
+            const data = obj.data as PathData
+
+            // Transform global point to object local space
+            // This fixes the coordinate transformation bug from the original implementation
+            const localPoint = worldToLocal(point, obj)
+
+            // Add erase path in local coordinates
+            const newErasePaths = data.erasePaths ? [...data.erasePaths] : []
+            newErasePaths.push({
+                points: [localPoint],
+                width: brushSettings.size
+            })
+
+            updateObject(obj.id, {
+                data: { ...data, erasePaths: newErasePaths }
+            })
+        })
+
+    } else {
+        // Object eraser: Delete entire objects
+        const objectsToErase = objects.filter(obj => {
+            const layer = layers.find(l => l.id === obj.layerId)
+            if (!layer?.visible || layer.locked) return false
+
+            // Proper hit testing
+            return isPointInObject(point, obj)
+        })
+
+        objectsToErase.forEach(obj => {
+            runtime.deleteObject(obj.id)
+        })
+    }
+}
+
+/**
+ * Transform world coordinates to object local coordinates
+ * Handles rotation, scale, and anchor point
+ */
+function worldToLocal(worldPoint: Point, obj: CanvasObject): Point {
+    const transform = obj.transform
+
+    // Translate to origin
+    let x = worldPoint.x - transform.x
+    let y = worldPoint.y - transform.y
+
+    // Apply inverse rotation
+    if (transform.rotation !== 0) {
+        const rad = -(transform.rotation * Math.PI / 180)
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const rotX = x * cos - y * sin
+        const rotY = x * sin + y * cos
+        x = rotX
+        y = rotY
+    }
+
+    // Apply inverse scale
+    x /= transform.scaleX
+    y /= transform.scaleY
+
+    return { x, y }
+}
+
+/**
+ * Check if a point is inside an object's bounds
+ * Handles rotation and scale transformations
+ */
+function isPointInObject(point: Point, obj: CanvasObject): boolean {
+    const localPoint = worldToLocal(point, obj)
+
+    // Get object size
+    let width = 0
+    let height = 0
+
+    switch (obj.type) {
+        case 'path':
+            const pathData = obj.data as PathData
+            if (pathData.points.length === 0) return false
+            const xs = pathData.points.map(p => p.x)
+            const ys = pathData.points.map(p => p.y)
+            width = Math.max(...xs) - Math.min(...xs)
+            height = Math.max(...ys) - Math.min(...ys)
+            break
+        case 'shape':
+        case 'text':
+        case 'note':
+        case 'image':
+            width = (obj.data as any).width || 0
+            height = (obj.data as any).height || 0
+            break
+    }
+
+    // Check if local point is within bounds
+    return localPoint.x >= 0 && localPoint.x <= width &&
+        localPoint.y >= 0 && localPoint.y <= height
+}
+
+export default EraserTool

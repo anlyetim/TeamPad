@@ -27,12 +27,8 @@ export function ChatPanel() {
     if (!message.trim()) return
 
     // This action now handles broadcasting internally via store logic
-    addChatMessage({
-      id: `msg-${Date.now()}`,
-      userId: currentUserId,
-      content: message,
-      timestamp: Date.now(),
-    })
+    // This action now handles broadcasting internally via store logic
+    addChatMessage(message)
 
     setMessage("")
   }
@@ -63,16 +59,15 @@ export function ChatPanel() {
 
   return (
     <div
-      className={`fixed bottom-4 right-4 z-30 flex w-80 flex-col rounded-xl border border-white/20 bg-white/90 shadow-2xl backdrop-blur-xl transition-all dark:border-white/10 dark:bg-neutral-900/90 ${
-        isMinimized ? "h-14" : "h-96"
-      }`}
+      className={`fixed bottom-4 right-4 z-30 flex w-80 flex-col rounded-xl border border-white/20 bg-white/90 shadow-2xl backdrop-blur-xl transition-all dark:border-white/10 dark:bg-neutral-900/90 ${isMinimized ? "h-14" : "h-96"
+        }`}
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 p-3 dark:border-neutral-800">
         <div className="flex items-center gap-2">
           <MessageSquare className="size-5" style={{ color: highlightColor }} />
           <h3 className="font-semibold text-neutral-800 dark:text-neutral-200">{t("chat")}</h3>
-          <span 
+          <span
             className="rounded-full px-2 py-0.5 text-xs font-medium"
             style={{ backgroundColor: `${highlightColor}20`, color: highlightColor }}
           >
@@ -115,7 +110,7 @@ export function ChatPanel() {
                       className="size-8 flex-shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white"
                       style={{ backgroundColor: user?.color || "#999999" }}
                     >
-                       {user?.name?.charAt(0).toUpperCase() || "?"}
+                      {user?.name?.charAt(0).toUpperCase() || "?"}
                     </div>
 
                     {/* Message Content */}
@@ -132,11 +127,10 @@ export function ChatPanel() {
                         </span>
                       </div>
                       <div
-                        className={`max-w-xs rounded-lg px-3 py-2 text-sm break-words ${
-                          isCurrentUser
+                        className={`max-w-xs rounded-lg px-3 py-2 text-sm break-words ${isCurrentUser
                             ? "text-white"
                             : "bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200"
-                        }`}
+                          }`}
                         style={isCurrentUser ? { backgroundColor: highlightColor } : {}}
                       >
                         {msg.content}

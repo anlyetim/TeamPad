@@ -1,0 +1,250 @@
+// components/tools/ShapeTool.ts - GIMP-style shape tool with constrained drawing
+
+import type { ToolHandler, ToolContext } from '@/lib/toolRegistry'
+import type { Point, CanvasObject, ShapeData } from '@/lib/types'
+import { useHaloboardStore } from '@/lib/store'
+
+interface ShapeToolState {
+    isDrawing: boolean
+    startPoint: Point | null
+    currentPoint: Point | null
+    isShiftPressed: boolean // Track Shift for constrained shapes
+    isAltPressed: boolean // Track Alt for center-based drawing
+}
+
+const state: ShapeToolState = {
+    isDrawing: false,
+    startPoint: null,
+    currentPoint: null,
+    isShiftPressed: false,
+    isAltPressed: false
+}
+
+export const ShapeTool: ToolHandler = {
+    name: 'shape',
+    cursor: 'crosshair',
+
+    onActivate: (ctx: ToolContext) => {
+        state.isDrawing = false
+        state.startPoint = null
+        state.currentPoint = null
+        state.isShiftPressed = false
+        state.isAltPressed = false
+    },
+
+    onDeactivate: (ctx: ToolContext) => {
+        state.isDrawing = false
+        state.startPoint = null
+        state.currentPoint = null
+        state.isShiftPressed = false
+        state.isAltPressed = false
+    },
+
+    onMouseDown: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        state.isDrawing = true
+        state.startPoint = point
+        state.currentPoint = point
+        state.isShiftPressed = e.shiftKey
+        state.isAltPressed = e.altKey
+    },
+
+    onMouseMove: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        if (!state.isDrawing) return
+        state.currentPoint = point
+        state.isShiftPressed = e.shiftKey
+        state.isAltPressed = e.altKey
+    },
+
+    onMouseUp: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        if (!state.isDrawing || !state.startPoint) return
+
+        const store = useHaloboardStore.getState()
+        const { shapeSettings, activeLayerId, addObject, setSelectedIds, setActiveTool } = store
+
+        // Calculate shape bounds with GIMP-style modifiers
+        const bounds = calculateShapeBounds(
+            state.startPoint,
+            point,
+            e.shiftKey, // Constrain aspect ratio
+            e.altKey    // Draw from center
+        )
+
+        // Minimum size check
+        if (bounds.width < 10 || bounds.height < 10) {
+            state.isDrawing = false
+            state.startPoint = null
+            state.currentPoint = null
+            return
+        }
+
+        const shapeData: ShapeData = {
+            shapeType: shapeSettings?.shapeType || 'rectangle',
+            width: bounds.width,
+            height: bounds.height,
+            fillColor: shapeSettings?.fillColor || '#4F46E5',
+            strokeColor: shapeSettings?.strokeColor || '#000000',
+            strokeWidth: shapeSettings?.strokeWidth || 2,
+            borderType: shapeSettings?.borderType || 'solid',
+            opacity: shapeSettings?.opacity || 1
+        }
+
+        const shapeObj: CanvasObject = {
+            id: `shape-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            name: `${shapeSettings?.shapeType || 'Rectangle'}`,
+            type: 'shape',
+            layerId: activeLayerId,
+            transform: {
+                x: bounds.x,
+                y: bounds.y,
+                rotation: 0,
+                scaleX: 1,
+                scaleY: 1,
+                anchor: 'top-left'
+            },
+            data: shapeData
+        }
+
+        addObject(shapeObj)
+        setSelectedIds([shapeObj.id])
+        setActiveTool('select')
+
+        state.isDrawing = false
+        state.startPoint = null
+        state.currentPoint = null
+        state.isShiftPressed = false
+        state.isAltPressed = false
+    },
+
+    getCursor: (point: Point, ctx: ToolContext) => {
+        return 'crosshair'
+    },
+
+    renderOverlay: (ctx: CanvasRenderingContext2D, toolCtx: ToolContext) => {
+        if (!state.isDrawing || !state.startPoint || !state.currentPoint) return
+
+        const store = useHaloboardStore.getState()
+        const { shapeSettings, highlightColor } = store
+
+        // Calculate bounds with current modifier state
+        const bounds = calculateShapeBounds(
+            state.startPoint,
+            state.currentPoint,
+            state.isShiftPressed,
+            state.isAltPressed
+        )
+
+        ctx.save()
+        ctx.strokeStyle = highlightColor || '#0078FF'
+        ctx.fillStyle = shapeSettings?.fillColor ? shapeSettings.fillColor + '40' : 'rgba(0, 120, 255, 0.2)'
+        ctx.lineWidth = 2 / toolCtx.zoom
+        ctx.setLineDash([5, 5])
+
+        const shapeType = shapeSettings?.shapeType || 'rectangle'
+
+        switch (shapeType) {
+            case 'circle':
+            case 'ellipse':
+                ctx.beginPath()
+                const radiusX = bounds.width / 2
+                const radiusY = shapeType === 'circle' ? radiusX : bounds.height / 2
+                ctx.ellipse(
+                    bounds.x + bounds.width / 2,
+                    bounds.y + bounds.height / 2,
+                    radiusX,
+                    radiusY,
+                    0, 0, Math.PI * 2
+                )
+                ctx.fill()
+                ctx.stroke()
+                break
+
+            case 'rounded_rectangle':
+                const radius = Math.min(bounds.width, bounds.height) * 0.2
+                ctx.beginPath()
+                ctx.roundRect(bounds.x, bounds.y, bounds.width, bounds.height, radius)
+                ctx.fill()
+                ctx.stroke()
+                break
+
+            default:
+                // Rectangle and other shapes
+                ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
+                ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+        }
+
+        // Draw center indicator when Alt is pressed
+        if (state.isAltPressed && state.startPoint) {
+            ctx.setLineDash([])
+            ctx.strokeStyle = highlightColor || '#0078FF'
+            ctx.lineWidth = 1 / toolCtx.zoom
+            ctx.beginPath()
+            ctx.moveTo(state.startPoint.x - 5 / toolCtx.zoom, state.startPoint.y)
+            ctx.lineTo(state.startPoint.x + 5 / toolCtx.zoom, state.startPoint.y)
+            ctx.moveTo(state.startPoint.x, state.startPoint.y - 5 / toolCtx.zoom)
+            ctx.lineTo(state.startPoint.x, state.startPoint.y + 5 / toolCtx.zoom)
+            ctx.stroke()
+        }
+
+        ctx.restore()
+    }
+}
+
+/**
+ * Calculate shape bounds with GIMP-style modifiers
+ * @param start - Starting point (anchor)
+ * @param end - Current mouse position
+ * @param constrain - Shift key: constrain to square/circle
+ * @param fromCenter - Alt key: draw from center
+ * @returns Bounding box { x, y, width, height }
+ */
+function calculateShapeBounds(
+    start: Point,
+    end: Point,
+    constrain: boolean,
+    fromCenter: boolean
+): { x: number; y: number; width: number; height: number } {
+    let x1 = start.x
+    let y1 = start.y
+    let x2 = end.x
+    let y2 = end.y
+
+    // Calculate initial width and height
+    let width = Math.abs(x2 - x1)
+    let height = Math.abs(y2 - y1)
+
+    // Shift key: Constrain to square (1:1 aspect ratio)
+    if (constrain) {
+        const maxDim = Math.max(width, height)
+        width = maxDim
+        height = maxDim
+
+        // Adjust endpoint to maintain constraint while following mouse direction
+        if (x2 < x1) {
+            x2 = x1 - width
+        } else {
+            x2 = x1 + width
+        }
+
+        if (y2 < y1) {
+            y2 = y1 - height
+        } else {
+            y2 = y1 + height
+        }
+    }
+
+    // Calculate top-left corner
+    let x = Math.min(x1, x2)
+    let y = Math.min(y1, y2)
+
+    // Alt key: Draw from center
+    if (fromCenter) {
+        x = x1 - width / 2
+        y = y1 - height / 2
+        width = width
+        height = height
+    }
+
+    return { x, y, width, height }
+}
+
+export default ShapeTool

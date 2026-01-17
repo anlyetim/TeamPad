@@ -1,17 +1,15 @@
-// hooks/useKeyboardShortcuts.ts - Handles global keyboard shortcuts for clipboard and selection operations.
+// hooks/useKeyboardShortcuts.ts - Photoshop-style keyboard shortcuts for all tools and operations
 
 import { useEffect } from 'react'
 import { useHaloboardStore } from '@/lib/store'
-import { getCollaborationManager } from '@/lib/collaboration'
+import { getEditorRuntime } from '@/lib/editorRuntime'
+import type { PhotoshopTool } from '@/lib/types'
 
 export function useKeyboardShortcuts() {
   const {
     selectedIds,
     objects,
     setSelectedIds,
-    setClipboard,
-    clipboard,
-    addObject,
     copy,
     paste,
     duplicate,
@@ -20,85 +18,63 @@ export function useKeyboardShortcuts() {
     setActiveTool
   } = useHaloboardStore()
 
+  const editorRuntime = getEditorRuntime()
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if typing in input/textarea
       if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return
 
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
       const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey
 
-      // Tool shortcuts (single keys, no modifiers)
-      if (!cmdOrCtrl && !e.altKey && !e.shiftKey) {
-        switch (e.key.toLowerCase()) {
-          case 'v':
-            e.preventDefault()
-            setActiveTool('select')
-            break
-          case 'b':
-            e.preventDefault()
-            setActiveTool('brush')
-            break
-          case 'e':
-            e.preventDefault()
-            setActiveTool('eraser')
-            break
-          case 't':
-            e.preventDefault()
-            setActiveTool('text')
-            break
-          case 'n':
-            e.preventDefault()
-            setActiveTool('note')
-            break
-          case 's':
-            e.preventDefault()
-            setActiveTool('shape')
-            break
-          case 'i':
-            e.preventDefault()
-            setActiveTool('image')
-            break
+      // Photoshop Tool Shortcuts (single keys, no modifiers)
+      if (!cmdOrCtrl && !e.altKey) {
+        // Use keybindings from store
+        const { keybindings } = useHaloboardStore.getState()
+
+        // Reverse map: key -> action
+        const keyToTool: Record<string, string> = {}
+        Object.entries(keybindings).forEach(([action, key]) => {
+          keyToTool[key.toLowerCase()] = action === 'note' ? 'note' : action // ensure 'note' matches tool name
+        })
+
+        const pressedKey = e.key.toLowerCase()
+        if (keyToTool[pressedKey]) {
+          e.preventDefault()
+          setActiveTool(keyToTool[pressedKey] as any) // Type assertion safe due to keyToTool construction
+          return
         }
-        return
       }
 
-      // Edit shortcuts (with Ctrl/Cmd)
+      // Edit Operations (with Ctrl/Cmd)
       if (cmdOrCtrl) {
         switch (e.key.toLowerCase()) {
-          case 'c':
+          case 'c': // Copy
             e.preventDefault()
             if (selectedIds.length > 0) {
-              const selectedObjects = objects.filter(obj => selectedIds.includes(obj.id))
-              setClipboard(selectedObjects)
+              copy()
             }
             break
-          case 'v':
+
+          case 'v': // Paste
             e.preventDefault()
-            if (clipboard.length > 0) {
-              const pasteX = 500
-              const pasteY = 300
-              clipboard.forEach((obj, index) => {
-                const offset = index * 20
-                const newObj = {
-                  ...obj,
-                  id: `${obj.id}-copy-${Date.now()}-${index}`,
-                  transform: { ...obj.transform, x: pasteX + offset, y: pasteY + offset }
-                }
-                addObject(newObj)
-              })
-            }
+            paste()
             break
-          case 'd':
+
+          case 'd': // Duplicate
             e.preventDefault()
             if (selectedIds.length > 0) {
-              duplicate(selectedIds)
+              duplicate()
             }
             break
-          case 'a':
+
+          case 'a': // Select All
             e.preventDefault()
             setSelectedIds(objects.map(obj => obj.id))
             break
-          case 'z':
+
+          case 'z': // Undo/Redo
             e.preventDefault()
             if (e.shiftKey) {
               redo()
@@ -106,15 +82,36 @@ export function useKeyboardShortcuts() {
               undo()
             }
             break
-          case 'y':
+
+          case 'y': // Redo (alternative)
             e.preventDefault()
             redo()
             break
         }
+        return
+      }
+
+      // Transform Operations (no modifiers)
+      switch (e.key) {
+        case 'Escape':
+          // Cancel current operation
+          e.preventDefault()
+          setSelectedIds([])
+          break
+
+        case 'Delete':
+        case 'Backspace':
+          // Delete selected objects
+          e.preventDefault()
+          selectedIds.forEach(id => {
+            editorRuntime.deleteObject(id)
+          })
+          setSelectedIds([])
+          break
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedIds, objects, clipboard, setClipboard, setSelectedIds, addObject, duplicate, undo, redo, setActiveTool])
+  }, [selectedIds, objects, setSelectedIds, copy, paste, duplicate, undo, redo, setActiveTool, editorRuntime])
 }

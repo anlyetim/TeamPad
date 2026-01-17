@@ -1,0 +1,101 @@
+// components/NoteEditorOverlay.tsx - Inline note editing overlay for sticky note creation.
+
+import React, { useState, useRef, useEffect } from 'react'
+import { useHaloboardStore } from '@/lib/store'
+
+interface NoteEditorOverlayProps {
+  position: { x: number; y: number }
+  initialContent: string
+  onCommit: (content: string) => void
+  onCancel: () => void
+}
+
+export function NoteEditorOverlay({ position, initialContent, onCommit, onCancel }: NoteEditorOverlayProps) {
+  const [content, setContent] = useState(initialContent)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const { noteProperties } = useHaloboardStore()
+  const [styles, setStyles] = useState<React.CSSProperties>({
+    left: `${position.x}px`,
+    top: `${position.y}px`,
+    transform: 'translate(0, 0) scale(0.2)',
+    opacity: 0
+  })
+
+  useEffect(() => {
+    // Trigger animation to center (Zoom effect)
+    const timer = setTimeout(() => {
+      setStyles({
+        left: '50%',
+        top: '50%',
+        transform: 'translate(-50%, -50%) scale(1)', // Zoom to 100%
+        opacity: 1
+      })
+    }, 10)
+
+    if (textareaRef.current) {
+      textareaRef.current.focus()
+    }
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onCancel()
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onCommit(content)
+    }
+  }
+
+  const handleBlur = () => {
+    // Blur to save. (Consistent with Text, though instructions say Enter saves)
+    onCommit(content)
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity duration-300" onClick={onCancel} />
+      <div
+        className="fixed z-50 pointer-events-auto transition-all duration-500 cubic-bezier(0.175, 0.885, 0.32, 1.275)" // Bouncy zoom
+        style={styles}
+      >
+        <div
+          className="shadow-2xl"
+          style={{
+            backgroundColor: noteProperties.backgroundColor,
+            borderRadius: `${noteProperties.cornerRadius}px`,
+            padding: '24px',
+            minWidth: '300px',
+            minHeight: '300px', // Larger centered note
+            border: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            style={{
+              flex: 1,
+              border: 'none',
+              background: 'transparent',
+              resize: 'none',
+              fontFamily: noteProperties.fontFamily,
+              fontSize: `${Math.max(24, (noteProperties.fontSize || 14) * 1.5)}px`, // Large text for modal
+              outline: 'none',
+              color: '#333'
+            }}
+            placeholder="Type your note..."
+          />
+          <div className="mt-2 text-right">
+            <span className="text-[10px] opacity-50 uppercase tracking-widest font-semibold">Sticky Note</span>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}

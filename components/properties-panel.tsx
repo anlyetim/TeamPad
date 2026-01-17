@@ -2,11 +2,11 @@
 
 import { useHaloboardStore } from "@/lib/store"
 import { Slider } from "@/components/ui/slider"
-import { Eye, EyeOff, Lock, LockOpen, ChevronDown, Plus, Trash2 } from "lucide-react"
+import { Eye, EyeOff, Lock, LockOpen, ChevronDown, Plus, Trash2, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight } from "lucide-react"
 import { useState } from "react"
 
 export function PropertiesPanel() {
-  const { layers, selectedIds, objects, showPropertiesPanel, addLayer, updateLayer, deleteLayer, updateObject } =
+  const { layers, selectedIds, objects, showPropertiesPanel, addLayer, updateLayer, deleteLayer, updateObject, highlightColor } =
     useHaloboardStore()
 
   const [expandedSections, setExpandedSections] = useState({
@@ -41,9 +41,8 @@ export function PropertiesPanel() {
           >
             <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Layers</p>
             <ChevronDown
-              className={`size-4 text-neutral-600 transition-transform dark:text-neutral-400 ${
-                expandedSections.layers ? "rotate-180" : ""
-              }`}
+              className={`size-4 text-neutral-600 transition-transform dark:text-neutral-400 ${expandedSections.layers ? "rotate-180" : ""
+                }`}
             />
           </summary>
 
@@ -126,9 +125,8 @@ export function PropertiesPanel() {
             >
               <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Properties</p>
               <ChevronDown
-                className={`size-4 text-neutral-600 transition-transform dark:text-neutral-400 ${
-                  expandedSections.properties ? "rotate-180" : ""
-                }`}
+                className={`size-4 text-neutral-600 transition-transform dark:text-neutral-400 ${expandedSections.properties ? "rotate-180" : ""
+                  }`}
               />
             </summary>
 
@@ -307,33 +305,276 @@ export function PropertiesPanel() {
                   </>
                 )}
 
-                {selectedObject.type === "note" && (
-                  <div>
-                    <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
-                      Note Color
-                    </label>
-                    <div className="grid grid-cols-4 gap-2">
-                      {["#FFF2CC", "#D6F1E9", "#FFD6E8", "#D6E8FF", "#E8D6FF", "#FFE8D6"].map((color) => (
+                {selectedObject.type === "text" && (
+                  <>
+                    {/* Text Color */}
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                        Text Color
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={(selectedObject.data as any).color || '#000000'}
+                          onChange={(e) =>
+                            updateObject(selectedObject.id, {
+                              data: {
+                                ...(selectedObject.data as any),
+                                color: e.target.value,
+                              },
+                            })
+                          }
+                          className="h-10 w-10 cursor-pointer rounded-lg border-2 border-neutral-200 dark:border-neutral-700"
+                        />
+                        <input
+                          type="text"
+                          value={(selectedObject.data as any).color || '#000000'}
+                          onChange={(e) =>
+                            updateObject(selectedObject.id, {
+                              data: {
+                                ...(selectedObject.data as any),
+                                color: e.target.value,
+                              },
+                            })
+                          }
+                          className="flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-mono dark:border-neutral-700 dark:bg-neutral-800"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Font Family */}
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                        Font
+                      </label>
+                      <select
+                        value={(selectedObject.data as any).fontFamily || 'Inter'}
+                        onChange={(e) =>
+                          updateObject(selectedObject.id, {
+                            data: {
+                              ...(selectedObject.data as any),
+                              fontFamily: e.target.value,
+                            },
+                          })
+                        }
+                        className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                        style={{ fontFamily: (selectedObject.data as any).fontFamily || 'Inter' }}
+                      >
+                        <option value="Inter">Inter</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="Times New Roman">Times New Roman</option>
+                        <option value="Courier New">Courier New</option>
+                        <option value="Verdana">Verdana</option>
+                        <option value="Comic Sans MS">Comic Sans</option>
+                      </select>
+                    </div>
+
+                    {/* Font Size */}
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                        Font Size
+                      </label>
+                      <input
+                        type="number"
+                        min="8"
+                        max="200"
+                        value={(selectedObject.data as any).fontSize || 16}
+                        onChange={(e) =>
+                          updateObject(selectedObject.id, {
+                            data: {
+                              ...(selectedObject.data as any),
+                              fontSize: parseInt(e.target.value) || 16,
+                            },
+                          })
+                        }
+                        className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                      />
+                    </div>
+
+                    {/* Text Formatting */}
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                        Formatting
+                      </label>
+                      <div className="flex gap-1">
                         <button
-                          key={color}
                           onClick={() =>
                             updateObject(selectedObject.id, {
                               data: {
                                 ...(selectedObject.data as any),
-                                color,
+                                fontWeight: (selectedObject.data as any).fontWeight === 'bold' ? 'normal' : 'bold',
                               },
                             })
                           }
-                          className={`aspect-square rounded-lg border-2 transition-transform hover:scale-110 ${
-                            (selectedObject.data as any).color === color
-                              ? "border-[#0A84FF] ring-2 ring-[#0A84FF]/30"
-                              : "border-neutral-200 dark:border-neutral-700"
-                          }`}
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
+                          className={`p-2 rounded-lg border transition-colors ${(selectedObject.data as any).fontWeight === 'bold'
+                              ? 'bg-blue-500 text-white border-blue-500'
+                              : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            }`}
+                        >
+                          <Bold className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            updateObject(selectedObject.id, {
+                              data: {
+                                ...(selectedObject.data as any),
+                                fontStyle: (selectedObject.data as any).fontStyle === 'italic' ? 'normal' : 'italic',
+                              },
+                            })
+                          }
+                          className={`p-2 rounded-lg border transition-colors ${(selectedObject.data as any).fontStyle === 'italic'
+                              ? 'bg-blue-500 text-white border-blue-500'
+                              : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            }`}
+                        >
+                          <Italic className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            updateObject(selectedObject.id, {
+                              data: {
+                                ...(selectedObject.data as any),
+                                textDecoration: (selectedObject.data as any).textDecoration === 'underline' ? 'none' : 'underline',
+                              },
+                            })
+                          }
+                          className={`p-2 rounded-lg border transition-colors ${(selectedObject.data as any).textDecoration === 'underline'
+                              ? 'bg-blue-500 text-white border-blue-500'
+                              : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            }`}
+                        >
+                          <Underline className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+
+                    {/* Text Alignment */}
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                        Alignment
+                      </label>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() =>
+                            updateObject(selectedObject.id, {
+                              data: {
+                                ...(selectedObject.data as any),
+                                align: 'left',
+                              },
+                            })
+                          }
+                          className={`p-2 rounded-lg border transition-colors ${(selectedObject.data as any).align === 'left' || !(selectedObject.data as any).align
+                              ? 'bg-blue-500 text-white border-blue-500'
+                              : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            }`}
+                        >
+                          <AlignLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            updateObject(selectedObject.id, {
+                              data: {
+                                ...(selectedObject.data as any),
+                                align: 'center',
+                              },
+                            })
+                          }
+                          className={`p-2 rounded-lg border transition-colors ${(selectedObject.data as any).align === 'center'
+                              ? 'bg-blue-500 text-white border-blue-500'
+                              : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            }`}
+                        >
+                          <AlignCenter className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            updateObject(selectedObject.id, {
+                              data: {
+                                ...(selectedObject.data as any),
+                                align: 'right',
+                              },
+                            })
+                          }
+                          className={`p-2 rounded-lg border transition-colors ${(selectedObject.data as any).align === 'right'
+                              ? 'bg-blue-500 text-white border-blue-500'
+                              : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            }`}
+                        >
+                          <AlignRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {selectedObject.type === "note" && (
+                  <>
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                        Note Color
+                      </label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {["#FFF2CC", "#D6F1E9", "#FFD6E8", "#D6E8FF", "#E8D6FF", "#FFE8D6", "#F0F8FF", "#F5F5DC"].map((color) => (
+                          <button
+                            key={color}
+                            onClick={() =>
+                              updateObject(selectedObject.id, {
+                                data: {
+                                  ...(selectedObject.data as any),
+                                  backgroundColor: color,
+                                },
+                              })
+                            }
+                            className={`aspect-square rounded-lg border-2 transition-transform hover:scale-110 ${(selectedObject.data as any).backgroundColor === color
+                              ? "ring-2 ring-offset-1"
+                              : "border-neutral-200 dark:border-neutral-700"
+                              }`}
+                            style={{
+                              backgroundColor: color,
+                              '--ring': highlightColor
+                            } as React.CSSProperties}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                        Background Style
+                      </label>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[
+                          { type: 'plain', label: 'Plain', icon: '⬜' },
+                          { type: 'lined', label: 'Lined', icon: '📝' },
+                          { type: 'grid', label: 'Grid', icon: '⊞' },
+                          { type: 'striped', label: 'Stripes', icon: '▨' }
+                        ].map(({ type, label, icon }) => (
+                          <button
+                            key={type}
+                            onClick={() =>
+                              updateObject(selectedObject.id, {
+                                data: {
+                                  ...(selectedObject.data as any),
+                                  backgroundType: type,
+                                },
+                              })
+                            }
+                            className={`flex flex-col items-center gap-1 rounded-lg border-2 py-2 text-xs font-medium transition-all ${(selectedObject.data as any).backgroundType === type
+                              ? 'ring-2 ring-offset-1'
+                              : 'border-neutral-200 bg-transparent text-neutral-600 hover:border-neutral-300 dark:border-neutral-700 dark:text-neutral-400'
+                              }`}
+                            style={{
+                              '--ring': highlightColor
+                            } as React.CSSProperties}
+                          >
+                            <span className="text-lg">{icon}</span>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             )}

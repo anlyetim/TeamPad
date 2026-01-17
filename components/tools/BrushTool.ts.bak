@@ -1,0 +1,172 @@
+// components/tools/BrushTool.ts
+import type { ToolHandler, ToolContext } from '@/lib/toolRegistry'
+import type { Point, CanvasObject, PathData } from '@/lib/types'
+import { useHaloboardStore } from '@/lib/store'
+import { getBrushEngine, type BrushStampSettings, type BrushDynamics } from './core/GIMPBrushEngine'
+
+interface BrushState {
+    isDrawing: boolean
+    points: Point[]
+    startTime: number
+}
+
+const state: BrushState = {
+    isDrawing: false,
+    points: [],
+    startTime: 0
+}
+
+export const BrushTool: ToolHandler = {
+    name: 'brush',
+    cursor: 'none', // Custom brush cursor
+
+    onActivate: (ctx: ToolContext) => {
+        state.isDrawing = false
+        state.points = []
+    },
+
+    onDeactivate: (ctx: ToolContext) => {
+        if (state.isDrawing && state.points.length > 1) {
+            createStroke(ctx)
+        }
+        state.isDrawing = false
+        state.points = []
+    },
+
+    onMouseDown: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        state.isDrawing = true
+        state.points = [point]
+        state.startTime = Date.now()
+    },
+
+    onMouseMove: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        if (!state.isDrawing) return
+
+        const store = useHaloboardStore.getState()
+        const lastPoint = state.points[state.points.length - 1]
+
+        if (lastPoint) {
+            const distance = Math.sqrt(
+                (point.x - lastPoint.x) ** 2 + (point.y - lastPoint.y) ** 2
+            )
+
+            // Dynamic spacing based on brush size and spacing setting
+            const spacing = store.brushSettings.spacing || 0.1
+            const minDistance = Math.max(0.5, (store.brushSettings.size / ctx.zoom) * spacing * 0.25)
+
+            if (distance >= minDistance) {
+                state.points.push(point)
+            }
+        }
+    },
+
+    onMouseUp: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        if (state.isDrawing) {
+            // Add final point
+            state.points.push(point)
+
+            if (state.points.length > 1) {
+                createStroke(ctx)
+            } else if (state.points.length === 1) {
+                // Single click: create a dot
+                state.points.push(point)
+                createStroke(ctx)
+            }
+        }
+        state.isDrawing = false
+        state.points = []
+    },
+
+    getCursor: (point: Point, ctx: ToolContext) => {
+        return 'none' // We'll render custom cursor in overlay
+    },
+
+    renderOverlay: (ctx: CanvasRenderingContext2D, toolCtx: ToolContext) => {
+        const store = useHaloboardStore.getState()
+        const { brushSettings } = store
+
+        // Draw current stroke preview using GIMP brush engine
+        if (state.isDrawing && state.points.length > 0) {
+            const brushEngine = getBrushEngine()
+
+            const stampSettings: BrushStampSettings = {
+                size: brushSettings.size,
+                hardness: brushSettings.hardness,
+                opacity: brushSettings.opacity,
+                spacing: brushSettings.spacing || 0.25,
+                angle: 0,
+                aspectRatio: 1.0,
+                color: brushSettings.color
+            }
+
+            const dynamics: BrushDynamics = {
+                jitter: 0,
+                fade: 0
+            }
+
+            ctx.save()
+            ctx.globalCompositeOperation = 'source-over'
+
+            // Render the stroke preview
+            brushEngine.renderStroke(ctx, state.points, stampSettings, dynamics)
+
+            ctx.restore()
+        }
+
+        // TODO: Add brush cursor preview circle
+    }
+}
+
+function createStroke(ctx: ToolContext) {
+    const store = useHaloboardStore.getState()
+    const { brushSettings, activeLayerId, addObject } = store
+
+    if (state.points.length < 2) return
+
+    // Normalize points to be relative to bounding box
+    const xs = state.points.map(p => p.x)
+    const ys = state.points.map(p => p.y)
+    const minX = Math.min(...xs)
+    const minY = Math.min(...ys)
+    const maxX = Math.max(...xs)
+    const maxY = Math.max(...ys)
+
+    const normalizedPoints = state.points.map(p => ({
+        x: p.x - minX,
+        y: p.y - minY
+    }))
+
+    // Calculate bounding box size
+    const width = maxX - minX
+    const height = maxY - minY
+
+    // Expand bounds for brush size
+    const padding = brushSettings.size
+
+    const pathData: PathData = {
+        points: normalizedPoints,
+        strokeColor: brushSettings.color,
+        strokeWidth: brushSettings.size,
+        opacity: brushSettings.opacity
+    }
+
+    const pathObj: CanvasObject = {
+        id: `path-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: 'Brush Stroke',
+        type: 'path',
+        layerId: activeLayerId,
+        transform: {
+            x: minX,
+            y: minY,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+            anchor: 'top-left'
+        },
+        data: pathData
+    }
+
+    addObject(pathObj)
+}
+
+export default BrushTool

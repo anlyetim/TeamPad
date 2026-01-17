@@ -1,0 +1,106 @@
+// components/TextEditorOverlay.tsx - Text editing panel for Photoshop-like text tool.
+
+import React, { useState, useRef, useEffect } from 'react'
+import { useHaloboardStore } from '@/lib/store'
+
+interface TextEditorOverlayProps {
+  position: { x: number; y: number }
+  initialContent: string
+  isAreaText?: boolean
+  onCommit: (content: string, properties: any) => void
+  onCancel: () => void
+  onLiveUpdate: (content: string) => void
+}
+
+export function TextEditorOverlay({ position, initialContent, isAreaText = false, onCommit, onCancel, onLiveUpdate }: TextEditorOverlayProps) {
+  const [content, setContent] = useState(initialContent)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const { textProperties } = useHaloboardStore()
+  const [styles, setStyles] = useState<React.CSSProperties>({
+    left: `${position.x}px`,
+    top: `${position.y}px`,
+    transform: 'translate(0, 0) scale(0.8)',
+    opacity: 0
+  })
+
+  useEffect(() => {
+    // Trigger animation to center
+    const timer = setTimeout(() => {
+      setStyles({
+        left: '50%',
+        top: '50%',
+        transform: 'translate(-50%, -50%) scale(1)',
+        opacity: 1
+      })
+    }, 10)
+
+    if (textareaRef.current) {
+      textareaRef.current.focus()
+      if (initialContent) textareaRef.current.select()
+    }
+
+    return () => clearTimeout(timer)
+  }, [initialContent])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onCancel()
+    } else if (e.key === 'Enter' && !e.shiftKey && !isAreaText) {
+      e.preventDefault()
+      onCommit(content, textProperties)
+    }
+  }
+
+  const handleBlur = () => {
+    // Optional: Auto-save on blur?
+    // Requirement says "Hitting ENTER closes the modal".
+    // Blur might accidentally close it.
+    // I will keep blur behavior for click-outside saves, but double check req.
+    // "only one modal can be open... ESC cancels... ENTER saves"
+    // I will stick to blur saves for UX default, unless requested otherwise.
+    onCommit(content, textProperties)
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setContent(e.target.value)
+    onLiveUpdate(e.target.value)
+  }
+
+  const minWidth = 300
+  const minHeight = 150
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity duration-300" onClick={onCancel} />
+      <div
+        className="fixed z-50 pointer-events-auto transition-all duration-300 ease-out shadow-2xl rounded-xl"
+        style={styles}
+      >
+        <div className="bg-white dark:bg-neutral-800 rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 p-4 shadow-xl flex flex-col gap-2">
+          <div className="flex items-center justify-between border-b pb-2 border-neutral-100 dark:border-neutral-700">
+            <span className="text-sm font-semibold text-neutral-500">Text Editor</span>
+            <span className="text-xs text-neutral-400">Enter to save</span>
+          </div>
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            className="w-full bg-transparent outline-none resize-none"
+            style={{
+              minWidth: `${minWidth}px`,
+              minHeight: `${minHeight}px`,
+              fontFamily: textProperties.fontFamily,
+              fontSize: `${Math.max(16, textProperties.fontSize)}px`, // Min legible size for editor
+              fontWeight: textProperties.fontWeight,
+              color: textProperties.color,
+              textAlign: textProperties.alignment as any
+            }}
+            placeholder="Type content..."
+          />
+        </div>
+      </div>
+    </>
+  )
+}

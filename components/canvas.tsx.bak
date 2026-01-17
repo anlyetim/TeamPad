@@ -1,0 +1,1589 @@
+"use client"
+
+import type React from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
+import { useHaloboardStore } from "@/lib/store"
+import type { Point, CanvasObject, PathData, ShapeData, TextData, NoteData, ImageData, TransformHandle, SelectionMode } from "@/lib/types"
+import { useCollaboration } from "@/lib/collaboration"
+import { useTheme } from "next-themes"
+import { useTranslation } from "@/lib/i18n"
+import { MousePointer2, Crown, RotateCw, Move, Scaling } from "lucide-react"
+import { CollaborationCursors } from "./collaboration-cursors"
+import { TextEditorOverlay } from "./TextEditorOverlay"
+import { NoteEditorOverlay } from "./NoteEditorOverlay"
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
+import { useKeybindings } from "@/hooks/useKeybindings"
+import { broadcastCursorLocal } from "@/lib/cursorSync"
+import { getEditorRuntime } from "@/lib/editorRuntime"
+import { getToolRegistry } from "@/lib/toolRegistry"
+import { BrushTool } from "./tools/BrushTool"
+import { EraserTool } from "./tools/EraserTool"
+import { SelectionTool } from "./tools/SelectionTool"
+
+export function Canvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const scratchCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const imageCache = useRef<Record<string, HTMLImageElement>>({})
+
+  // Photoshop-like state management
+  // activeTool is now managed by the store
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('new')
+  const [isTransforming, setIsTransforming] = useState(false)
+  const [activeHandle, setActiveHandle] = useState<TransformHandle | null>(null)
+  const [transformPivot, setTransformPivot] = useState<Point | null>(null)
+
+  // Drawing state
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [currentPath, setCurrentPath] = useState<Point[]>([])
+  const [brushPoints, setBrushPoints] = useState<Point[]>([])
+
+  // Selection state
+  const selectionRectRef = useRef<{ start: Point; end: Point } | null>(null)
+  const [dragStart, setDragStart] = useState<Point | null>(null)
+  const [initialTransforms, setInitialTransforms] = useState<Map<string, any>>(new Map())
+
+  // Text/Note editing state
+  const [editingObjectId, setEditingObjectId] = useState<string | null>(null)
+  const [textEditPosition, setTextEditPosition] = useState<Point | null>(null)
+  const [noteEditPosition, setNoteEditPosition] = useState<Point | null>(null)
+
+  // New EditorModal state
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean
+    type: 'text' | 'note' | null
+    objectId: string | null
+    position: Point | null
+  }>({ isOpen: false, type: null, objectId: null, position: null })
+
+  // Mouse and cursor state
+  const [mousePosition, setMousePosition] = useState<Point>({ x: 0, y: 0 })
+  const [cursorType, setCursorType] = useState<string>('default')
+  const [isPanning, setIsPanning] = useState(false)
+
+  // Animation and performance
+  const [displayRefreshRate, setDisplayRefreshRate] = useState(60)
+  const animationFrameRef = useRef<number | null>(null)
+  const lastRenderTime = useRef<number>(0)
+  const [localIsPanning, setLocalIsPanning] = useState(false)
+  const isDirtyRef = useRef<boolean>(true) // Dirty flag for optimized rendering
+
+
+  // Mark canvas as dirty when state changes
+  const markDirty = useCallback(() => {
+    isDirtyRef.current = true
+  }, [])
+
+
+  // Editor runtime
+  const editorRuntime = getEditorRuntime()
+
+  const { theme } = useTheme()
+  const { t } = useTranslation()
+
+  const store = useHaloboardStore()
+  const {
+    objects,
+    layers,
+    activeTool,
+    setActiveTool: storeSetActiveTool,
+    brushSettings,
+    shapeSettings,
+    textProperties,
+    noteProperties,
+    addObject,
+    updateObject,
+    activeLayerId,
+    selectedIds,
+    setSelectedIds,
+    setHighlightColor,
+    highlightColor,
+    canvasSettings,
+    zoom,
+    panX,
+    panY,
+    setPan,
+    showGrid,
+    gridType,
+    showTransformHandles,
+    setZoom,
+    copy, paste, duplicate,
+    keybindings,
+    currentUserId,
+    currentProjectId,
+    users,
+    isOnline
+  } = store
+
+  // Alias setActiveTool for local usage to match previous code structure if needed, or just use storeSetActiveTool
+  const setActiveTool = storeSetActiveTool
+
+
+  const collaboration = useCollaboration(currentProjectId, currentUserId)
+
+  const currentUser = users.find(u => u.id === currentUserId)
+  const cursorColor = (isOnline && currentUser && currentUser.isAdmin) ? "#FFD700" : (isOnline && currentUser) ? currentUser.color : null
+
+  // Initialize editor runtime with callbacks
+  useEffect(() => {
+    editorRuntime.setCallbacks({
+      onObjectUpdate: (object) => {
+        // Broadcast object update
+        if (collaboration) {
+          collaboration.broadcastObjectCommit?.(object)
+        }
+      },
+      onObjectDelete: (objectId) => {
+        // Broadcast object deletion
+        if (collaboration) {
+          collaboration.broadcastObjectDelete?.(objectId)
+        }
+      },
+      onTransformDelta: (delta) => {
+        // Broadcast transform delta
+        if (collaboration) {
+          collaboration.broadcastTransformDelta?.(delta.objectId, delta.delta)
+        }
+      },
+      onTextLiveUpdate: (update) => {
+        // Broadcast live text update
+        if (collaboration) {
+          collaboration.broadcastTextLive?.(update.objectId, update.content)
+        }
+      },
+      onSnapshotRequest: () => {
+        // Request snapshot from peers
+        if (collaboration) {
+          collaboration.requestSnapshot?.()
+        }
+      }
+    })
+  }, [editorRuntime, collaboration])
+
+
+  // Detect display refresh rate for smooth rendering
+  useEffect(() => {
+    let frameCount = 0
+    let lastTime = performance.now()
+
+    const measureFPS = () => {
+      frameCount++
+      const now = performance.now()
+
+      if (now - lastTime >= 1000) {
+        const fps = Math.round((frameCount * 1000) / (now - lastTime))
+        setDisplayRefreshRate(fps)
+        frameCount = 0
+        lastTime = now
+      }
+
+      requestAnimationFrame(measureFPS)
+    }
+
+    const rafId = requestAnimationFrame(measureFPS)
+    return () => cancelAnimationFrame(rafId)
+  }, [])
+
+  // Global mouse tracking
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      setMousePosition({ x: e.clientX, y: e.clientY })
+    }
+
+    window.addEventListener('mousemove', handleGlobalMouseMove)
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove)
+    }
+  }, [])
+
+  // Canvas resize and setup
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const container = containerRef.current
+    if (!canvas || !container) return
+
+    const updateSize = () => {
+      const dpr = window.devicePixelRatio || 1
+      const rect = container.getBoundingClientRect()
+      canvas.width = rect.width * dpr
+      canvas.height = rect.height * dpr
+
+      const ctx = canvas.getContext("2d")
+      if (ctx) {
+        ctx.scale(dpr, dpr)
+        renderCanvas()
+      }
+    }
+
+    const observer = new ResizeObserver(updateSize)
+    observer.observe(container)
+    updateSize()
+
+    return () => observer.disconnect()
+  }, [])
+
+  // Cleanup: Clear image cache and scratch canvas on unmount
+  useEffect(() => {
+    return () => {
+      // Clear image cache
+      Object.values(imageCache.current).forEach(img => {
+        img.src = '' // Release image resources
+      })
+      imageCache.current = {}
+
+      // Clear scratch canvas
+      if (scratchCanvasRef.current) {
+        scratchCanvasRef.current.width = 1
+        scratchCanvasRef.current.height = 1
+        scratchCanvasRef.current = null
+      }
+    }
+  }, [])
+
+  // Prevent native browser zoom
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+      }
+    }
+    window.addEventListener("wheel", handleWheel, { passive: false })
+    return () => window.removeEventListener("wheel", handleWheel)
+  }, [])
+
+  // Render loop with dirty flag optimization
+  useEffect(() => {
+    const render = (timestamp: number) => {
+      // Only render if canvas is dirty
+      if (isDirtyRef.current && timestamp - lastRenderTime.current >= (1000 / displayRefreshRate)) {
+        renderCanvas()
+        lastRenderTime.current = timestamp
+        isDirtyRef.current = false
+      }
+      animationFrameRef.current = requestAnimationFrame(render)
+    }
+
+    animationFrameRef.current = requestAnimationFrame(render)
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+    }
+  }, [displayRefreshRate]) // Minimal dependencies
+
+  // Mark dirty when relevant state changes
+  useEffect(() => {
+    markDirty()
+  }, [objects, layers, zoom, panX, panY, selectedIds, showGrid, gridType, highlightColor, theme, canvasSettings, currentPath, showTransformHandles, editingObjectId, markDirty])
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts()
+  useKeybindings() // Enable keybindings system for delete, copy, paste, etc.
+
+  // Broadcast cursor updates
+  useEffect(() => {
+    if (collaboration && mousePosition) {
+      broadcastCursorLocal(mousePosition)
+    }
+  }, [activeTool, collaboration, mousePosition])
+
+  // Convert screen coordinates to canvas coordinates
+  const screenToCanvas = useCallback((screenPoint: Point): Point => {
+    const canvas = canvasRef.current
+    if (!canvas) return screenPoint
+
+    const rect = canvas.getBoundingClientRect()
+    const canvasX = screenPoint.x - rect.left
+    const canvasY = screenPoint.y - rect.top
+
+    return {
+      x: (canvasX - panX) / zoom,
+      y: (canvasY - panY) / zoom
+    }
+  }, [zoom, panX, panY])
+
+  // Convert canvas coordinates to screen coordinates
+  const canvasToScreen = useCallback((canvasPoint: Point): Point => {
+    const canvas = canvasRef.current
+    if (!canvas) return canvasPoint
+
+    const rect = canvas.getBoundingClientRect()
+    return {
+      x: canvasPoint.x * zoom + panX + rect.left,
+      y: canvasPoint.y * zoom + panY + rect.top
+    }
+  }, [zoom, panX, panY])
+
+  // Get object at point with Photoshop-like hit testing
+  const getObjectAtPoint = useCallback((point: Point): CanvasObject | null => {
+    // Check objects in reverse layer order (top to bottom)
+    for (const layer of [...layers].reverse()) {
+      if (!layer.visible) continue
+
+      for (const objectId of [...layer.objectIds].reverse()) {
+        const object = objects.find(o => o.id === objectId)
+        if (!object) continue
+
+        // Get object bounds
+        const { width, height } = getObjectSize(object)
+        const bounds = {
+          left: object.transform.x,
+          top: object.transform.y,
+          right: object.transform.x + width * object.transform.scaleX,
+          bottom: object.transform.y + height * object.transform.scaleY
+        }
+
+        if (point.x >= bounds.left && point.x <= bounds.right &&
+          point.y >= bounds.top && point.y <= bounds.bottom) {
+          return object
+        }
+      }
+    }
+
+    return null
+  }, [objects, layers])
+
+  // Get transform handle at point (Photoshop-style)
+  const getTransformHandleAtPoint = useCallback((point: Point, object: CanvasObject): TransformHandle | null => {
+    if (!selectedIds.includes(object.id) || !showTransformHandles) return null
+
+    const { width, height } = getObjectSize(object)
+    const anchor = getAnchorOffset(object, width, height)
+    const handleSize = 10 / zoom
+    const rotateZone = 20 / zoom
+
+    // Transform point to object local coordinates
+    const localX = (point.x - object.transform.x) / object.transform.scaleX + anchor.x
+    const localY = (point.y - object.transform.y) / object.transform.scaleY + anchor.y
+
+    // Account for rotation
+    const cos = Math.cos(-object.transform.rotation * Math.PI / 180)
+    const sin = Math.sin(-object.transform.rotation * Math.PI / 180)
+    const rotatedX = localX * cos - localY * sin
+    const rotatedY = localX * sin + localY * cos
+
+    const hSizeX = handleSize / Math.abs(object.transform.scaleX)
+    const hSizeY = handleSize / Math.abs(object.transform.scaleY)
+
+    // Define handles
+    const corners = [
+      { x: 0, y: 0, handle: 'nw' as TransformHandle },
+      { x: width, y: 0, handle: 'ne' as TransformHandle },
+      { x: width, y: height, handle: 'se' as TransformHandle },
+      { x: 0, y: height, handle: 'sw' as TransformHandle }
+    ]
+
+    const edges = [
+      { x: width / 2, y: 0, handle: 'n' as TransformHandle },
+      { x: width, y: height / 2, handle: 'e' as TransformHandle },
+      { x: width / 2, y: height, handle: 's' as TransformHandle },
+      { x: 0, y: height / 2, handle: 'w' as TransformHandle }
+    ]
+
+    // Check corner handles first (highest priority)
+    for (const corner of corners) {
+      if (Math.abs(rotatedX - corner.x) <= hSizeX && Math.abs(rotatedY - corner.y) <= hSizeY) {
+        return corner.handle
+      }
+    }
+
+    // Check edge handles
+    for (const edge of edges) {
+      if (Math.abs(rotatedX - edge.x) <= hSizeX && Math.abs(rotatedY - edge.y) <= hSizeY) {
+        return edge.handle
+      }
+    }
+
+    // Check rotation handle FIRST (the stem and circle above the object)
+    // The rotation handle is a line from (width/2, 0) to (width/2, -30/zoom) with a circle at the end
+    const rotHandleY = -30 / zoom / Math.abs(object.transform.scaleY)
+    const rotHandleX = width / 2
+    const rotHandleRadius = handleSize / Math.abs(object.transform.scaleX) / 1.5
+
+    // Check if on the rotation handle circle
+    const distToRotHandle = Math.sqrt(
+      Math.pow(rotatedX - rotHandleX, 2) +
+      Math.pow(rotatedY - rotHandleY, 2)
+    )
+    if (distToRotHandle <= rotHandleRadius * 2) {
+      return 'rotate'
+    }
+
+    // Check if on the rotation handle stem (line from top center to the circle)
+    if (Math.abs(rotatedX - rotHandleX) <= hSizeX && rotatedY >= rotHandleY && rotatedY <= 0) {
+      return 'rotate'
+    }
+
+    // Check body - must be inside the object bounds (NOT outside)
+    if (rotatedX >= 0 && rotatedX <= width && rotatedY >= 0 && rotatedY <= height) {
+      return 'body'
+    }
+
+    return null
+  }, [selectedIds, showTransformHandles, zoom])
+
+  // Helper functions (same as before)
+  const getObjectSize = (obj: CanvasObject) => {
+    switch (obj.type) {
+      case "path": const d = obj.data as PathData; if (d.points.length < 2) return { width: 0, height: 0 }; const xs = d.points.map(p => p.x); const ys = d.points.map(p => p.y); return { width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) }
+      case "shape": return { width: (obj.data as ShapeData).width, height: (obj.data as ShapeData).height }
+      case "text": return { width: (obj.data as TextData).width, height: (obj.data as TextData).height }
+      case "note": return { width: (obj.data as NoteData).width, height: (obj.data as NoteData).height }
+      case "image": return { width: (obj.data as ImageData).width, height: (obj.data as ImageData).height }
+    }
+    return { width: 0, height: 0 }
+  }
+
+  const getAnchorOffset = (obj: CanvasObject, width: number, height: number) => {
+    const anchor = obj.transform.anchor || 'center'
+    let x = 0, y = 0
+    if (anchor.includes('center')) x = width / 2
+    if (anchor.includes('right')) x = width
+    if (anchor.includes('bottom')) y = height
+    if (anchor === 'center-left') y = height / 2
+    if (anchor === 'center-right') y = height / 2
+    if (anchor === 'center') { x = width / 2; y = height / 2 }
+    return { x, y }
+  }
+
+  const isPointInsideObject = (point: Point, obj: CanvasObject) => {
+    const { width, height } = getObjectSize(obj)
+    // Simple bounds check taking rotation into account could be complex, 
+    // but let's do a basic transformed point check similar to getTransformHandleAtPoint
+    const anchor = getAnchorOffset(obj, width, height)
+
+    // Transform point to object local coordinates
+    const localX = (point.x - obj.transform.x) / obj.transform.scaleX + anchor.x
+    const localY = (point.y - obj.transform.y) / obj.transform.scaleY + anchor.y
+
+    const cos = Math.cos(-obj.transform.rotation * Math.PI / 180)
+    const sin = Math.sin(-obj.transform.rotation * Math.PI / 180)
+    const rotatedX = localX * cos - localY * sin
+    const rotatedY = localX * sin + localY * cos
+
+    return rotatedX >= 0 && rotatedX <= width && rotatedY >= 0 && rotatedY <= height
+  }
+
+  // Photoshop-like mouse event handlers
+
+  // Initialize Tool Registry - MOVED HERE due to hoisting of screenToCanvas etc.
+  useEffect(() => {
+    const registry = getToolRegistry()
+    registry.setContext({
+      canvasRef: canvasRef as React.RefObject<HTMLCanvasElement>,
+      containerRef: containerRef as React.RefObject<HTMLDivElement>,
+      zoom,
+      panX,
+      panY,
+      screenToCanvas,
+      canvasToScreen,
+      getObjectAtPoint,
+      selectedIds,
+      setSelectedIds,
+      activeTool,
+      setActiveTool: storeSetActiveTool,
+      openModal: (type, objectId, position) => {
+        setModalState({ isOpen: true, type, objectId, position })
+      },
+      closeModal: () => setModalState({ ...modalState, isOpen: false })
+    })
+
+    // Register Tools
+    registry.register(BrushTool)
+    registry.register(EraserTool)
+    // Register Selection Tool variants
+    registry.register({ ...SelectionTool, name: 'select-rect' })
+    registry.register({ ...SelectionTool, name: 'select-ellipse' })
+    registry.register({ ...SelectionTool, name: 'select-lasso' })
+
+  }, [zoom, panX, panY, selectedIds, activeTool, screenToCanvas, canvasToScreen, getObjectAtPoint, storeSetActiveTool])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return
+
+    const canvasPoint = screenToCanvas({ x: e.clientX, y: e.clientY })
+    setDragStart(canvasPoint)
+
+    // Check Registry for Tool Handler
+    const registry = getToolRegistry()
+    const toolHandler = registry.getTool(activeTool)
+
+    if (toolHandler) {
+      registry.handleMouseDown(e, canvasPoint)
+      return
+    }
+
+    // Legacy / Built-in Tool Handling (Select/Move, Text, Shape, etc.)
+    switch (activeTool) {
+      case 'select':
+        handleSelectMouseDown(e, canvasPoint)
+        break
+      case 'text':
+        handleTextMouseDown(e, canvasPoint)
+        break
+      case 'note':
+        handleNoteMouseDown(e, canvasPoint)
+        break
+      case 'shape':
+        handleShapeMouseDown(e, canvasPoint)
+        break
+      case 'image':
+        handleImageMouseDown(e, canvasPoint)
+        break
+    }
+  }, [activeTool, screenToCanvas, selectedIds, selectionMode])
+
+  const handleSelectMouseDown = (e: React.MouseEvent, point: Point) => {
+    // Find object under cursor
+    const clickedObject = getObjectAtPoint(point)
+    const transformHandle = clickedObject ? getTransformHandleAtPoint(point, clickedObject) : null
+
+    if (transformHandle) {
+      // Start transform operation
+      setIsTransforming(true)
+      setActiveHandle(transformHandle)
+
+      // Store initial transforms for all selected objects
+      const initialMap = new Map<string, any>()
+      selectedIds.forEach(id => {
+        const obj = objects.find(o => o.id === id)
+        if (obj) {
+          initialMap.set(id, { ...obj.transform })
+        }
+      })
+      setInitialTransforms(initialMap)
+
+      // Set transform pivot
+      if (e.altKey) {
+        // Alt key: transform from center
+        setTransformPivot({ x: 0, y: 0 }) // Center of selection
+      } else {
+        setTransformPivot(null) // Use default pivot
+      }
+
+      return
+    }
+
+    if (clickedObject) {
+      // Handle object selection
+      let newSelection: string[]
+
+      switch (selectionMode) {
+        case 'new':
+          newSelection = [clickedObject.id]
+          break
+        case 'add':
+          newSelection = [...selectedIds, clickedObject.id]
+          break
+        case 'subtract':
+          newSelection = selectedIds.filter(id => id !== clickedObject.id)
+          break
+        case 'intersect':
+          newSelection = selectedIds.includes(clickedObject.id) ? [clickedObject.id] : []
+          break
+        default:
+          newSelection = [clickedObject.id]
+      }
+
+      setSelectedIds(newSelection)
+      setIsTransforming(true)
+      setActiveHandle('body')
+
+      // Store initial transforms
+      const initialMap = new Map<string, any>()
+      newSelection.forEach(id => {
+        const obj = objects.find(o => o.id === id)
+        if (obj) {
+          initialMap.set(id, { ...obj.transform })
+        }
+      })
+      setInitialTransforms(initialMap)
+    } else {
+      // Start selection rectangle
+      setSelectionRect({ start: point, end: point })
+      setIsTransforming(false)
+    }
+  }
+
+  const handleBrushMouseDown = (e: React.MouseEvent, point: Point) => {
+    setIsDrawing(true)
+    setBrushPoints([point])
+    setCurrentPath([point])
+  }
+
+  const handleEraserMouseDown = (e: React.MouseEvent, point: Point) => {
+    // Eraser tool - remove objects at point
+    const objectsToErase = objects.filter(obj => {
+      const layer = layers.find(l => l.id === obj.layerId)
+      if (!layer?.visible || layer.locked) return false
+      return isPointInsideObject(point, obj)
+    })
+
+    objectsToErase.forEach(obj => {
+      editorRuntime.deleteObject(obj.id)
+    })
+  }
+
+  const handleImageMouseDown = (e: React.MouseEvent, point: Point) => {
+    // Trigger file input for image import
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (file) {
+        const reader = new FileReader()
+        reader.onload = (event) => {
+          const src = event.target?.result as string
+          const img = new Image()
+          img.onload = () => {
+            const imageObj: CanvasObject = {
+              id: `image-${Date.now()}`,
+              name: 'Image',
+              type: 'image',
+              layerId: activeLayerId,
+              transform: { x: point.x, y: point.y, rotation: 0, scaleX: 1, scaleY: 1, anchor: 'top-left' },
+              data: { src, width: 200, height: 200 * (img.height / img.width), opacity: 1, blendMode: 'normal' }
+            }
+            addObject(imageObj)
+            setSelectedIds([imageObj.id])
+            storeSetActiveTool('select') // Auto-switch to selection after creating image
+          }
+          img.src = src
+        }
+        reader.readAsDataURL(file)
+      }
+    }
+    input.click()
+  }
+
+  const handleTextMouseDown = (e: React.MouseEvent, point: Point) => {
+    // Check if clicking existing text object
+    const existingObj = getObjectAtPoint(point)
+    if (existingObj && existingObj.type === 'text') {
+      setSelectedIds([existingObj.id])
+      return
+    }
+
+    // Create text object immediately
+    const textObj: CanvasObject = {
+      id: `text-${Date.now()}`,
+      name: 'Text',
+      type: 'text',
+      transform: { x: point.x, y: point.y, rotation: 0, scaleX: 1, scaleY: 1, anchor: 'top-left' },
+      data: {
+        content: 'Text',
+        fontFamily: textProperties.fontFamily,
+        fontSize: textProperties.fontSize,
+        color: textProperties.color,
+        align: textProperties.alignment,
+        width: 200,
+        height: 50
+      },
+      layerId: activeLayerId
+    }
+
+    addObject(textObj)
+    setSelectedIds([textObj.id])
+    setTextEditPosition(point)
+    setEditingObjectId(textObj.id)
+    storeSetActiveTool('select') // Auto-switch to selection after creating text
+  }
+
+  const handleNoteMouseDown = (e: React.MouseEvent, point: Point) => {
+    // Create note object with properties from store
+    const noteObj: CanvasObject = {
+      id: `note-${Date.now()}`,
+      name: t("note", "tools"),
+      type: 'note',
+      transform: { x: point.x, y: point.y, rotation: 0, scaleX: 1, scaleY: 1, anchor: 'top-left' },
+      data: {
+        content: '',
+        backgroundColor: noteProperties.backgroundColor || '#FFF2CC',
+        backgroundType: noteProperties.backgroundType || 'plain',
+        cornerRadius: noteProperties.cornerRadius || 12,
+        fontFamily: noteProperties.fontFamily || 'Inter',
+        fontSize: noteProperties.fontSize || 14,
+        width: 200,
+        height: 120
+      },
+      layerId: activeLayerId
+    }
+
+    addObject(noteObj)
+    setSelectedIds([noteObj.id])
+    storeSetActiveTool('select')
+  }
+
+  const handleShapeMouseDown = (e: React.MouseEvent, point: Point) => {
+    // Start shape creation
+    setDragStart(point)
+    setIsDrawing(true)
+  }
+
+
+  const setSelectionRect = (rect: { start: Point; end: Point } | null) => {
+    selectionRectRef.current = rect
+  }
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const canvasPoint = screenToCanvas({ x: e.clientX, y: e.clientY })
+
+    // Update cursor based on tool and hover state
+    updateCursor(canvasPoint)
+
+    if (localIsPanning) {
+      setPan(panX + e.movementX, panY + e.movementY)
+      return
+    }
+
+    // Delegate to Registry
+    const registry = getToolRegistry()
+    const toolHandler = registry.getTool(activeTool)
+    if (toolHandler) {
+      registry.handleMouseMove(e, canvasPoint)
+    }
+
+    // Handle legacy interaction modes (Transform, Draw Shape, Select Rect)
+    if (isTransforming && dragStart && activeHandle) {
+      handleTransformMouseMove(canvasPoint, e)
+    } else if (activeTool === 'shape' && dragStart) {
+      // Update shape preview
+      const width = Math.abs(canvasPoint.x - dragStart.x)
+      const height = Math.abs(canvasPoint.y - dragStart.y)
+      if (width > 5 && height > 5) {
+        setSelectionRect({
+          start: dragStart,
+          end: canvasPoint
+        })
+      }
+    } else if (activeTool === 'select' && selectionRectRef.current && dragStart) {
+      setSelectionRect({
+        start: dragStart,
+        end: canvasPoint
+      })
+    }
+
+    // Broadcast cursor for collaboration
+    if (collaboration) {
+      broadcastCursorLocal(canvasPoint)
+    }
+  }, [isPanning, isTransforming, isDrawing, selectionRectRef.current, dragStart, activeHandle, screenToCanvas, panX, panY, setPan, collaboration, brushSettings.eraserMode, brushSettings.size, zoom, objects, getObjectSize, isPointInsideObject, layers, updateObject, editorRuntime])
+
+  const updateCursor = (point: Point) => {
+    let cursor = 'default'
+
+    if (activeTool === 'select') {
+      const hoveredObject = getObjectAtPoint(point)
+      if (hoveredObject) {
+        const handle = getTransformHandleAtPoint(point, hoveredObject)
+        if (handle) {
+          switch (handle) {
+            case 'rotate':
+              cursor = 'rotate'
+              break
+            case 'nw':
+            case 'se':
+              cursor = 'nw-resize'
+              break
+            case 'ne':
+            case 'sw':
+              cursor = 'ne-resize'
+              break
+            case 'n':
+            case 's':
+              cursor = 'ns-resize'
+              break
+            case 'e':
+            case 'w':
+              cursor = 'ew-resize'
+              break
+            case 'body':
+              cursor = 'move'
+              break
+          }
+        } else {
+          cursor = 'move'
+        }
+      }
+    } else if (['brush', 'eraser', 'shape'].includes(activeTool)) {
+      cursor = 'crosshair'
+    } else if (activeTool === 'text') {
+      cursor = 'text'
+    }
+
+    setCursorType(cursor)
+  }
+
+  const handleTransformMouseMove = (point: Point, e: React.MouseEvent) => {
+    if (!dragStart || !activeHandle || initialTransforms.size === 0) return
+
+    const deltaX = point.x - dragStart.x
+    const deltaY = point.y - dragStart.y
+
+    selectedIds.forEach(objectId => {
+      const initialTransform = initialTransforms.get(objectId)
+      if (!initialTransform) return
+
+      let newTransform = { ...initialTransform }
+
+      switch (activeHandle) {
+        case 'body':
+          // Move operation
+          newTransform.x = initialTransform.x + deltaX
+          newTransform.y = initialTransform.y + deltaY
+          break
+
+        case 'rotate':
+          // Rotation operation
+          const object = objects.find(o => o.id === objectId)
+          if (object) {
+            const { width, height } = getObjectSize(object)
+            const centerX = object.transform.x
+            const centerY = object.transform.y
+
+            const angle = Math.atan2(point.y - centerY, point.x - centerX) * (180 / Math.PI) + 90
+
+            // Shift for 15° snapping
+            let finalAngle = angle
+            if (e.shiftKey) {
+              const snapIncrement = 15
+              finalAngle = Math.round(angle / snapIncrement) * snapIncrement
+            }
+
+            newTransform.rotation = initialTransform.rotation + (finalAngle - initialTransform.rotation)
+          }
+          break
+
+        default:
+          // Scale operation (corner/edge handles)
+          const targetObject = objects.find(o => o.id === objectId)
+          if (targetObject) {
+            const { width, height } = getObjectSize(targetObject)
+
+            // Calculate scale factors based on handle
+            let scaleX = initialTransform.scaleX
+            let scaleY = initialTransform.scaleY
+
+            const aspectRatio = width / height
+            const relativeDeltaX = deltaX / width
+            const relativeDeltaY = deltaY / height
+
+            // Handle different scale directions
+            if (activeHandle.includes('e')) scaleX = initialTransform.scaleX * (1 + relativeDeltaX)
+            if (activeHandle.includes('w')) scaleX = initialTransform.scaleX * (1 - relativeDeltaX)
+            if (activeHandle.includes('s')) scaleY = initialTransform.scaleY * (1 + relativeDeltaY)
+            if (activeHandle.includes('n')) scaleY = initialTransform.scaleY * (1 - relativeDeltaY)
+
+            // Constrain aspect ratio unless Shift is held
+            if (!e.shiftKey) {
+              if (activeHandle === 'nw' || activeHandle === 'se') {
+                scaleY = scaleX
+              } else if (activeHandle === 'ne' || activeHandle === 'sw') {
+                scaleY = scaleX
+              }
+            }
+
+            // Alt key: scale from center
+            if (e.altKey) {
+              const centerX = width / 2
+              const centerY = height / 2
+
+              const moveX = (scaleX - initialTransform.scaleX) * centerX
+              const moveY = (scaleY - initialTransform.scaleY) * centerY
+
+              newTransform.x = initialTransform.x - moveX
+              newTransform.y = initialTransform.y - moveY
+            }
+
+            newTransform.scaleX = scaleX
+            newTransform.scaleY = scaleY
+          }
+          break
+      }
+
+      // Apply transform using store.updateObject for proper sync
+      const obj = objects.find(o => o.id === objectId)
+      if (obj) {
+        updateObject(objectId, {
+          transform: { ...obj.transform, ...newTransform }
+        })
+      }
+    })
+  }
+
+  const handleDrawingMouseMove = (point: Point, e: React.MouseEvent) => {
+    if (activeTool === 'brush') {
+      // Add point to brush stroke with smoothing
+      const lastPoint = brushPoints[brushPoints.length - 1]
+      if (lastPoint) {
+        const distance = Math.sqrt((point.x - lastPoint.x) ** 2 + (point.y - lastPoint.y) ** 2)
+        if (distance > brushSettings.size / zoom) {
+          setBrushPoints(prev => [...prev, point])
+          setCurrentPath(prev => [...prev, point])
+        }
+      }
+    }
+  }
+
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    if (localIsPanning) {
+      setLocalIsPanning(false)
+      return
+    }
+
+    const canvasPoint = screenToCanvas({ x: e.clientX, y: e.clientY })
+
+    // Complete operations
+    setActiveHandle(null)
+    setInitialTransforms(new Map())
+
+
+    // Delegate to Registry
+    const registry = getToolRegistry()
+    if (registry.getTool(activeTool)) {
+      registry.handleMouseUp(e, canvasPoint)
+    }
+
+    // Handle tool-specific mouse up logic (Legacy)
+    if (activeTool === 'select' && selectionRectRef.current && dragStart) {
+      // Complete selection rectangle for select tool only
+      const rect = selectionRectRef.current
+      const selectedObjects: string[] = []
+
+      // Normalize the rectangle bounds (handle drawing in any direction)
+      const rectLeft = Math.min(rect.start.x, rect.end.x)
+      const rectRight = Math.max(rect.start.x, rect.end.x)
+      const rectTop = Math.min(rect.start.y, rect.end.y)
+      const rectBottom = Math.max(rect.start.y, rect.end.y)
+
+      objects.forEach(obj => {
+        const layer = layers.find(l => l.id === obj.layerId)
+        if (!layer?.visible || layer.locked) return
+
+        const { width, height } = getObjectSize(obj)
+        const bounds = {
+          left: obj.transform.x,
+          top: obj.transform.y,
+          right: obj.transform.x + width,
+          bottom: obj.transform.y + height
+        }
+
+        // Check if object intersects selection rectangle (normalized)
+        if (!(bounds.left > rectRight || bounds.right < rectLeft ||
+          bounds.top > rectBottom || bounds.bottom < rectTop)) {
+          selectedObjects.push(obj.id)
+        }
+      })
+
+      setSelectedIds(selectedObjects)
+      setSelectionRect(null)
+    }
+
+    if (activeTool === 'shape' && dragStart && selectionRectRef.current) {
+      // Create shape object - use selectionRect for shape dimensions
+      const rect = selectionRectRef.current
+      const width = Math.abs(rect.end.x - rect.start.x)
+      const height = Math.abs(rect.end.y - rect.start.y)
+
+      if (width > 5 && height > 5) {
+        const x = Math.min(rect.start.x, rect.end.x)
+        const y = Math.min(rect.start.y, rect.end.y)
+
+        const shapeObj: CanvasObject = {
+          id: `shape-${Date.now()}`,
+          name: t("shape", "tools"),
+          type: 'shape',
+          layerId: activeLayerId,
+          transform: { x, y, rotation: 0, scaleX: 1, scaleY: 1, anchor: 'top-left' },
+          data: {
+            shapeType: shapeSettings.shapeType,
+            width,
+            height,
+            fillColor: shapeSettings.fillColor,
+            strokeColor: shapeSettings.strokeColor,
+            strokeWidth: shapeSettings.strokeWidth,
+            borderType: shapeSettings.borderType,
+            opacity: shapeSettings.opacity
+          }
+        }
+
+        addObject(shapeObj)
+        setSelectedIds([shapeObj.id])
+        storeSetActiveTool('select') // Auto-switch to selection after creating shape
+        setSelectionRect(null)
+      }
+    }
+
+    setDragStart(null)
+  }, [isPanning, isTransforming, isDrawing, dragStart, activeTool, currentPath, screenToCanvas, objects, layers, selectedIds, setSelectedIds, t, activeLayerId, brushSettings, shapeSettings, editorRuntime, selectionRectRef])
+
+
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (activeTool !== 'select') return
+
+    const canvasPoint = screenToCanvas({ x: e.clientX, y: e.clientY })
+    const clickedObject = getObjectAtPoint(canvasPoint)
+
+    if (clickedObject && (clickedObject.type === 'text' || clickedObject.type === 'note')) {
+      setEditingObjectId(clickedObject.id)
+      if (clickedObject.type === 'text') {
+        setTextEditPosition(canvasPoint)
+      } else {
+        setNoteEditPosition(canvasPoint)
+      }
+      setSelectionRect(null) // Clear selection if any
+    }
+  }, [screenToCanvas, getObjectAtPoint, activeTool])
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      const delta = e.deltaY > 0 ? 0.9 : 1.1
+      setZoom(zoom * delta)
+    } else {
+      setPan(panX - e.deltaX, panY - e.deltaY)
+    }
+  }, [zoom, panX, panY, setZoom, setPan])
+
+  // Render functions (same as before)
+  const renderCanvas = () => {
+    const canvas = canvasRef.current; if (!canvas) return; const ctx = canvas.getContext("2d"); if (!ctx) return
+    const logicalWidth = canvas.width / (window.devicePixelRatio || 1); const logicalHeight = canvas.height / (window.devicePixelRatio || 1)
+
+    if (theme === 'dark') { ctx.fillStyle = "#171717"; ctx.fillRect(0, 0, logicalWidth, logicalHeight) }
+    else { ctx.clearRect(0, 0, logicalWidth, logicalHeight) }
+
+    // Grid
+    if (showGrid) {
+      ctx.save(); ctx.translate(panX, panY); ctx.scale(zoom, zoom)
+      const gridSize = 20; const gridColor = theme === 'dark' ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"
+      ctx.fillStyle = gridColor; ctx.strokeStyle = gridColor; ctx.lineWidth = 1 / zoom
+      const startX = -panX / zoom; const startY = -panY / zoom; const endX = startX + logicalWidth / zoom; const endY = startY + logicalHeight / zoom
+      const left = Math.floor(startX / gridSize) * gridSize; const top = Math.floor(startY / gridSize) * gridSize; const right = Math.ceil(endX / gridSize) * gridSize; const bottom = Math.ceil(endY / gridSize) * gridSize
+      ctx.beginPath()
+      if (gridType === 'lines' || gridType === 'grid') {
+        for (let x = left; x <= right; x += gridSize) { ctx.moveTo(x, top); ctx.lineTo(x, bottom) }
+        if (gridType === 'grid') { for (let y = top; y <= bottom; y += gridSize) { ctx.moveTo(left, y); ctx.lineTo(right, y) } }
+      } else {
+        for (let x = left; x <= right; x += gridSize) {
+          for (let y = top; y <= bottom; y += gridSize) {
+            if (gridType === 'dots') { ctx.fillRect(x - 1 / zoom, y - 1 / zoom, 2 / zoom, 2 / zoom) } else if (gridType === 'cross') { const size = 4 / zoom; ctx.moveTo(x - size, y); ctx.lineTo(x + size, y); ctx.moveTo(x, y - size); ctx.lineTo(x, y + size) }
+          }
+        }
+      }
+      ctx.stroke(); ctx.restore()
+    }
+
+    ctx.save(); ctx.translate(panX, panY); ctx.scale(zoom, zoom)
+
+    if (!canvasSettings.infinite) {
+      ctx.shadowColor = "rgba(0,0,0,0.1)"; ctx.shadowBlur = 20; ctx.shadowOffsetY = 4
+      ctx.fillStyle = canvasSettings.backgroundColor; ctx.fillRect(0, 0, canvasSettings.width, canvasSettings.height)
+      ctx.shadowColor = "transparent"
+    }
+
+    // Objects
+    [...layers].reverse().forEach(layer => {
+      if (!layer.visible) return
+
+      const layerOpacity = layer.opacity ?? 1
+      const layerBlendMode = layer.blendMode ?? 'normal'
+
+      // Skip rendering if layer is fully transparent
+      if (layerOpacity === 0) return
+
+      [...layer.objectIds].reverse().forEach(objId => {
+        const obj = objects.find(o => o.id === objId)
+        if (!obj || obj.id === editingObjectId) return
+        const { width, height } = getObjectSize(obj)
+        const anchor = getAnchorOffset(obj, width, height)
+
+        ctx.save()
+
+        // Apply Layer Opacity & Blending
+        ctx.globalAlpha = layerOpacity
+        ctx.globalCompositeOperation = layerBlendMode === 'normal' ? 'source-over' : layerBlendMode as GlobalCompositeOperation
+
+        ctx.translate(obj.transform.x, obj.transform.y)
+        ctx.translate(anchor.x * obj.transform.scaleX, anchor.y * obj.transform.scaleY)
+        ctx.rotate((obj.transform.rotation * Math.PI) / 180)
+        ctx.scale(obj.transform.scaleX, obj.transform.scaleY)
+        ctx.translate(-anchor.x, -anchor.y)
+
+        switch (obj.type) {
+          case "path": renderPath(ctx, obj); break;
+          case "shape": renderShape(ctx, obj); break;
+          case "text": renderText(ctx, obj); break;
+          case "note": renderNote(ctx, obj); break;
+          case "image": renderImage(ctx, obj); break;
+        }
+        ctx.restore()
+        if (selectedIds.includes(obj.id) && obj.id !== editingObjectId) renderSelection(ctx, obj)
+      })
+    })
+
+    // Drawing path preview
+    if (isDrawing && activeTool === 'brush' && currentPath.length > 1) {
+      ctx.save(); ctx.globalAlpha = brushSettings.opacity; ctx.strokeStyle = brushSettings.color; ctx.lineWidth = brushSettings.size
+      ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(currentPath[0].x, currentPath[0].y)
+      for (let i = 1; i < currentPath.length; i++) ctx.lineTo(currentPath[i].x, currentPath[i].y)
+      ctx.stroke(); ctx.restore()
+    }
+
+    // Selection Rect - only for select tool
+    if (activeTool === 'select' && selectionRectRef.current && dragStart) {
+      const rect = selectionRectRef.current
+      const x = Math.min(rect.start.x, rect.end.x)
+      const y = Math.min(rect.start.y, rect.end.y)
+      const w = Math.abs(rect.end.x - rect.start.x)
+      const h = Math.abs(rect.end.y - rect.start.y)
+      ctx.save(); ctx.fillStyle = `${highlightColor}20`; ctx.strokeStyle = highlightColor; ctx.lineWidth = 1 / zoom
+      ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h); ctx.restore()
+    }
+
+    // Shape preview - only for shape tool
+    if (activeTool === 'shape' && selectionRectRef.current && dragStart) {
+      const rect = selectionRectRef.current
+      const x = Math.min(rect.start.x, rect.end.x)
+      const y = Math.min(rect.start.y, rect.end.y)
+      const w = Math.abs(rect.end.x - rect.start.x)
+      const h = Math.abs(rect.end.y - rect.start.y)
+      ctx.save(); ctx.strokeStyle = highlightColor; ctx.lineWidth = 1 / zoom; ctx.setLineDash([5, 5])
+      ctx.strokeRect(x, y, w, h); ctx.restore()
+    }
+
+    // Registry Tool Overlays
+    getToolRegistry().renderOverlay(ctx)
+    ctx.restore()
+  }
+
+  // ... (renderPath, renderShape etc. same as before, omitting for brevity but included in actual code) ...
+  const renderPath = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => {
+    const data = obj.data as PathData
+    if (data.points.length < 2) return
+
+    // If partial eraser paths exist, we must use offscreen canvas for correct composition
+    if (data.erasePaths && data.erasePaths.length > 0) {
+      if (!scratchCanvasRef.current) {
+        scratchCanvasRef.current = document.createElement('canvas')
+      }
+      const scratch = scratchCanvasRef.current
+      if (scratch.width !== ctx.canvas.width || scratch.height !== ctx.canvas.height) {
+        scratch.width = ctx.canvas.width
+        scratch.height = ctx.canvas.height
+      } else {
+        const sCtx = scratch.getContext('2d')
+        sCtx?.clearRect(0, 0, scratch.width, scratch.height)
+      }
+
+      const sCtx = scratch.getContext('2d')
+      if (!sCtx) return
+
+      // Copy transform from main context
+      const transform = ctx.getTransform()
+      sCtx.setTransform(transform)
+
+      // Draw original path
+      sCtx.globalAlpha *= data.opacity
+      sCtx.strokeStyle = data.strokeColor
+      sCtx.lineWidth = data.strokeWidth
+      sCtx.lineCap = "round"
+      sCtx.lineJoin = "round"
+      sCtx.setLineDash([])
+      sCtx.beginPath()
+      sCtx.moveTo(data.points[0].x, data.points[0].y)
+      for (let i = 1; i < data.points.length; i++) sCtx.lineTo(data.points[i].x, data.points[i].y)
+      sCtx.stroke()
+
+      // Apply erasures
+      sCtx.globalCompositeOperation = 'destination-out'
+      data.erasePaths.forEach(path => {
+        if (!path.points || path.points.length === 0) return
+        sCtx.lineWidth = path.width || data.strokeWidth
+        sCtx.beginPath()
+        sCtx.moveTo(path.points[0].x, path.points[0].y)
+        // If it's a single point, draw a dot (line to same point doesn't draw anything usually unless rounded cap)
+        if (path.points.length === 1) {
+          sCtx.lineTo(path.points[0].x, path.points[0].y) // Forces a dot with round cap
+        } else {
+          for (let i = 1; i < path.points.length; i++) sCtx.lineTo(path.points[i].x, path.points[i].y)
+        }
+        sCtx.stroke()
+      })
+
+      // Reset composite op
+      sCtx.globalCompositeOperation = 'source-over'
+
+      // Draw scratch canvas to main canvas
+      // We must reset transform on main canvas temporarily because scratch is already transformed?
+      // No, we drew TO scratch using the transform. So scratch has the drawing in the "screen space" of the canvas?
+      // Wait. `sCtx.setTransform(transform)`. `transform` is the current transform of `ctx` (including pan/zoom/obj transform).
+      // So `scratch` now contains the object drawn at the correct location on the full canvas buffer.
+      // So to draw it back, we need to draw `scratch` at (0,0) with Identity transform on `ctx`.
+      // BUT `ctx` is currently transformed.
+
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0) // Identity
+      // Actually we need to respect pixel ratio... `ctx` backing store might be larger.
+      // `scratch` size was set to `ctx.canvas.width` which is physical pixels.
+      // So we draw it at 0,0 1:1.
+      ctx.drawImage(scratch, 0, 0)
+      ctx.restore()
+
+    } else {
+      // Standard render
+      ctx.globalAlpha *= data.opacity
+      ctx.strokeStyle = data.strokeColor
+      ctx.lineWidth = data.strokeWidth
+      ctx.lineCap = "round"
+      ctx.lineJoin = "round"
+      ctx.setLineDash([])
+      ctx.beginPath()
+      ctx.moveTo(data.points[0].x, data.points[0].y)
+      for (let i = 1; i < data.points.length; i++) ctx.lineTo(data.points[i].x, data.points[i].y)
+      ctx.stroke()
+    }
+  }
+  const renderShape = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as ShapeData; ctx.globalAlpha *= data.opacity; ctx.setLineDash([]); let lineWidth = data.strokeWidth; if (data.borderType === 'dashed') ctx.setLineDash([10, 10]); if (data.borderType === 'dotted') ctx.setLineDash([3, 5]); if (data.borderType === 'bold') lineWidth = data.strokeWidth * 2; if (data.borderType === 'none') lineWidth = 0; ctx.lineWidth = lineWidth; ctx.strokeStyle = data.strokeColor; ctx.fillStyle = data.fillColor; ctx.beginPath(); const w = data.width, h = data.height; switch (data.shapeType) { case "rectangle": ctx.rect(0, 0, w, h); break; case "rounded_rectangle": ctx.roundRect(0, 0, w, h, Math.min(w, h) * 0.2); break; case "ellipse": ctx.ellipse(w / 2, h / 2, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2); break; case "circle": ctx.ellipse(w / 2, h / 2, Math.min(Math.abs(w), Math.abs(h)) / 2, Math.min(Math.abs(w), Math.abs(h)) / 2, 0, 0, Math.PI * 2); break; case "line": ctx.moveTo(0, 0); ctx.lineTo(w, h); break; case "triangle": ctx.moveTo(w / 2, 0); ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); break; case "arrow": { const head = Math.min(Math.abs(w), Math.abs(h)) * 0.3; ctx.moveTo(0, h / 3); ctx.lineTo(w - head, h / 3); ctx.lineTo(w - head, 0); ctx.lineTo(w, h / 2); ctx.lineTo(w - head, h); ctx.lineTo(w - head, h * 2 / 3); ctx.lineTo(0, h * 2 / 3); ctx.closePath(); break; } case "star": { const cx = w / 2, cy = h / 2, or = Math.min(w, h) / 2, ir = or / 2.5; for (let i = 0; i < 10; i++) { const r = i % 2 === 0 ? or : ir; const a = (Math.PI / 5) * i - Math.PI / 2; i === 0 ? ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r) : ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); break; } case "cloud": { ctx.moveTo(w * 0.2, h * 0.5); ctx.bezierCurveTo(w * 0.1, h * 0.3, w * 0.3, h * 0.1, w * 0.4, h * 0.3); ctx.bezierCurveTo(w * 0.5, h * 0.1, w * 0.7, h * 0.2, w * 0.7, h * 0.4); ctx.bezierCurveTo(w * 0.9, h * 0.3, w, h * 0.6, w * 0.8, h * 0.8); ctx.bezierCurveTo(w * 0.9, h, w * 0.6, h, w * 0.5, h * 0.9); ctx.bezierCurveTo(w * 0.4, h, w * 0.1, h * 0.9, w * 0.2, h * 0.7); ctx.bezierCurveTo(0, h * 0.7, 0, h * 0.5, w * 0.2, h * 0.5); ctx.closePath(); break; } case "speech_bubble": { const br = Math.min(w, h) * 0.2; ctx.moveTo(br, 0); ctx.lineTo(w - br, 0); ctx.quadraticCurveTo(w, 0, w, br); ctx.lineTo(w, h - br * 2); ctx.quadraticCurveTo(w, h - br, w - br, h - br); ctx.lineTo(w / 2 + br, h - br); ctx.lineTo(w / 2, h); ctx.lineTo(w / 2 - br, h - br); ctx.lineTo(br, h - br); ctx.quadraticCurveTo(0, h - br, 0, h - br * 2); ctx.lineTo(0, br); ctx.quadraticCurveTo(0, 0, br, 0); ctx.closePath(); break; } } if (data.fillColor) ctx.fill(); if (data.borderType !== 'none') ctx.stroke() }
+  const renderText = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => {
+    const data = obj.data as TextData;
+    const fontWeight = data.fontWeight === 'bold' ? 'bold' : 'normal';
+    const fontStyle = data.fontStyle === 'italic' ? 'italic' : 'normal';
+    ctx.font = `${fontStyle} ${fontWeight} ${data.fontSize}px ${data.fontFamily}`;
+    ctx.fillStyle = data.color;
+    ctx.textBaseline = "top";
+    ctx.textAlign = data.align || "left";
+    ctx.setLineDash([]);
+    const lines = data.content.split("\n");
+    const lineHeight = data.fontSize * 1.2;
+    let xOffset = 0;
+    if (data.align === "center") xOffset = data.width / 2;
+    if (data.align === "right") xOffset = data.width;
+    lines.forEach((line, i) => {
+      const y = i * lineHeight;
+      ctx.fillText(line, xOffset, y);
+      // Draw underline if needed
+      if (data.textDecoration === 'underline') {
+        const metrics = ctx.measureText(line);
+        let underlineX = xOffset;
+        if (data.align === "center") underlineX = xOffset - metrics.width / 2;
+        else if (data.align === "right") underlineX = xOffset - metrics.width;
+        else underlineX = xOffset;
+        ctx.beginPath();
+        ctx.strokeStyle = data.color;
+        ctx.lineWidth = Math.max(1, data.fontSize / 12);
+        ctx.moveTo(underlineX, y + data.fontSize * 0.9);
+        ctx.lineTo(underlineX + metrics.width, y + data.fontSize * 0.9);
+        ctx.stroke();
+      }
+    });
+  }
+  const renderNote = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => {
+    const data = obj.data as NoteData;
+    const cornerRadius = data.cornerRadius || 12;
+
+    // Draw rounded rectangle background
+    ctx.fillStyle = data.backgroundColor || '#FFF2CC';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, data.width, data.height, cornerRadius);
+    ctx.fill();
+
+    // Draw background pattern
+    if (data.backgroundType === 'grid') {
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      const gridSize = 20;
+      for (let x = 0; x < data.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, data.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < data.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(data.width, y);
+        ctx.stroke();
+      }
+    } else if (data.backgroundType === 'lined') {
+      ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+      ctx.lineWidth = 1;
+      const lineSpacing = 24;
+      for (let y = lineSpacing; y < data.height; y += lineSpacing) {
+        ctx.beginPath();
+        ctx.moveTo(8, y);
+        ctx.lineTo(data.width - 8, y);
+        ctx.stroke();
+      }
+    } else if (data.backgroundType === 'striped') {
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 2;
+      const stripeHeight = 12;
+      for (let y = 0; y < data.height; y += stripeHeight * 2) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(data.width, y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw border
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, data.width, data.height, cornerRadius);
+    ctx.stroke();
+
+    // Draw text
+    ctx.fillStyle = '#000000';
+    ctx.font = `${data.fontSize || 14}px ${data.fontFamily || 'Inter'}, sans-serif`;
+    ctx.textBaseline = "top";
+    ctx.setLineDash([]);
+    ctx.textAlign = 'left';
+
+    const padding = 12;
+    const lines = (data.content || '').split("\n");
+    const lineHeight = (data.fontSize || 14) * 1.2;
+
+    lines.forEach((line, i) => {
+      ctx.fillText(line, padding, padding + i * lineHeight, data.width - padding * 2)
+    });
+  }
+  const renderImage = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => { const data = obj.data as ImageData; ctx.globalAlpha *= data.opacity; const blend = (data.blendMode && data.blendMode !== 'normal') ? data.blendMode : 'source-over'; ctx.globalCompositeOperation = blend as GlobalCompositeOperation; ctx.setLineDash([]); if (data.src && !data.src.startsWith('/placeholder')) { let img = imageCache.current[data.src]; if (!img) { img = new Image(); img.src = data.src; img.onload = () => renderCanvas(); imageCache.current[data.src] = img; } if (img.complete && img.naturalWidth > 0) { ctx.drawImage(img, 0, 0, data.width, data.height); return; } } ctx.fillStyle = "#e0e0e0"; ctx.fillRect(0, 0, data.width, data.height); ctx.strokeStyle = "#999999"; ctx.lineWidth = 2; ctx.strokeRect(0, 0, data.width, data.height); ctx.fillStyle = "#666666"; ctx.font = "48px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("🖼️", data.width / 2, data.height / 2) }
+
+  const renderSelection = (ctx: CanvasRenderingContext2D, obj: CanvasObject) => {
+    if (!showTransformHandles) return;
+    const { width, height } = getObjectSize(obj);
+    const anchor = getAnchorOffset(obj, width, height);
+    const handleSize = 8 / zoom;
+
+    ctx.save();
+    ctx.translate(obj.transform.x + anchor.x * obj.transform.scaleX, obj.transform.y + anchor.y * obj.transform.scaleY);
+    ctx.rotate((obj.transform.rotation * Math.PI) / 180);
+    ctx.scale(obj.transform.scaleX, obj.transform.scaleY);
+    ctx.translate(-anchor.x, -anchor.y);
+
+    // Draw Border
+    ctx.strokeStyle = highlightColor;
+    ctx.lineWidth = 2 / zoom;
+    ctx.strokeRect(0, 0, width, height);
+
+    // Draw Handles (Invariant size)
+    const hSizeX = handleSize / Math.abs(obj.transform.scaleX);
+    const hSizeY = handleSize / Math.abs(obj.transform.scaleY);
+
+    ctx.fillStyle = "#FFFFFF";
+    ctx.strokeStyle = highlightColor;
+    ctx.lineWidth = 1 / zoom;
+
+    const drawHandle = (x: number, y: number) => {
+      ctx.fillRect(x - hSizeX / 2, y - hSizeY / 2, hSizeX, hSizeY);
+      ctx.strokeRect(x - hSizeX / 2, y - hSizeY / 2, hSizeX, hSizeY)
+    };
+
+    // Corner handles
+    drawHandle(0, 0); drawHandle(width, 0); drawHandle(width, height); drawHandle(0, height);
+
+    // Edge midpoint handles
+    drawHandle(width / 2, 0); // Top
+    drawHandle(width, height / 2); // Right
+    drawHandle(width / 2, height); // Bottom
+    drawHandle(0, height / 2); // Left
+
+    // Rotation Handle
+    const rotHandleY = - (30 / Math.abs(obj.transform.scaleY) / zoom);
+    ctx.beginPath(); ctx.moveTo(width / 2, 0); ctx.lineTo(width / 2, rotHandleY); ctx.stroke();
+    ctx.beginPath(); ctx.arc(width / 2, rotHandleY, Math.abs(hSizeX / 1.5), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+    // Pivot
+    ctx.beginPath();
+    ctx.moveTo(anchor.x - 5 / zoom / Math.abs(obj.transform.scaleX), anchor.y);
+    ctx.lineTo(anchor.x + 5 / zoom / Math.abs(obj.transform.scaleX), anchor.y);
+    ctx.moveTo(anchor.x, anchor.y - 5 / zoom / Math.abs(obj.transform.scaleY));
+    ctx.lineTo(anchor.x, anchor.y + 5 / zoom / Math.abs(obj.transform.scaleY));
+    ctx.strokeStyle = '#0A84FF'; ctx.lineWidth = 2 / zoom; ctx.stroke();
+    ctx.restore()
+  }
+
+  return (
+    <div ref={containerRef} className="absolute inset-0 w-full h-full overflow-hidden">
+      <canvas
+        ref={canvasRef}
+        className="block w-full h-full"
+        style={{
+          cursor: cursorType === 'move' ? 'move' :
+            cursorType === 'grabbing' ? 'grabbing' :
+              cursorType === 'nw-resize' ? 'nw-resize' :
+                cursorType === 'ne-resize' ? 'ne-resize' :
+                  cursorType === 'ns-resize' ? 'ns-resize' :
+                    cursorType === 'ew-resize' ? 'ew-resize' :
+                      cursorType === 'crosshair' ? 'crosshair' :
+                        cursorType === 'text' ? 'text' :
+                          cursorType === 'rotate' ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 1 1-9-9c2.52 0 4.85.85 6.71 2.29'/%3E%3Cpath d='M21 3v6h-6'/%3E%3C/svg%3E") 12 12, crosshair` :
+                            cursorType === 'resize' ? 'nw-resize' : 'default'
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
+        onWheel={handleWheel}
+      />
+      <CollaborationCursors />
+
+      {/* CUSTOM GLOBAL CURSOR */}
+      {cursorColor && (
+        <div
+          className="pointer-events-none fixed z-[9999]"
+          style={{
+            left: `${mousePosition.x}px`,
+            top: `${mousePosition.y}px`,
+            transform: "translate(-2px, -2px)", // Tip adjustment
+          }}
+        >
+          {cursorType === 'rotate' ? (
+            <div className="relative">
+              <RotateCw className="size-5 animate-spin-slow drop-shadow-md" style={{ color: cursorColor }} />
+            </div>
+          ) : cursorType === 'resize' ? (
+            <div className="relative">
+              <Scaling className="size-5 drop-shadow-md" style={{ color: cursorColor }} />
+            </div>
+          ) : cursorType === 'move' ? (
+            <div className="relative">
+              <Move className="size-5 drop-shadow-md" style={{ color: cursorColor }} />
+            </div>
+          ) : (
+            // Default Arrow
+            <div className="relative">
+              <MousePointer2
+                className="size-5 drop-shadow-md"
+                style={{
+                  color: cursorColor,
+                  fill: cursorColor
+                }}
+              />
+              {isOnline && currentUser?.isAdmin && (
+                <Crown className="absolute -top-1 -right-1 size-3 drop-shadow-md" style={{ color: "#FFD700", fill: "#FFD700" }} />
+              )}
+            </div>
+          )}
+
+          {/* Nickname Tag (Only Online) */}
+          {isOnline && currentUser && cursorType === 'default' && (
+            <div
+              className="mt-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium text-white shadow-sm"
+              style={{ backgroundColor: cursorColor }}
+            >
+              {currentUser.name || "Me"}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Text Editor Modal */}
+      {editingObjectId && textEditPosition && (() => {
+        const editingObj = editingObjectId !== 'new-text' ? objects.find(o => o.id === editingObjectId) : null;
+        const textData = editingObj?.data as TextData | undefined;
+        return (
+          <TextEditorOverlay
+            position={textEditPosition}
+            initialContent={editingObjectId === 'new-text' ? '' : textData?.content || ''}
+            initialStyles={textData ? {
+              fontFamily: textData.fontFamily,
+              fontSize: textData.fontSize,
+              fontWeight: textData.fontWeight,
+              fontStyle: textData.fontStyle,
+              textDecoration: textData.textDecoration,
+              align: textData.align,
+              color: textData.color
+            } : undefined}
+            isAreaText={false}
+            onCommit={(content, properties) => {
+              if (editingObjectId === 'new-text') {
+                const textObj: CanvasObject = {
+                  id: `text-${Date.now()}`,
+                  name: 'Text',
+                  type: 'text',
+                  transform: { x: textEditPosition.x, y: textEditPosition.y, rotation: 0, scaleX: 1, scaleY: 1, anchor: 'top-left' },
+                  data: { content, ...properties, width: 200, height: 50 },
+                  layerId: activeLayerId
+                }
+                addObject(textObj)
+                setSelectedIds([textObj.id])
+                storeSetActiveTool('select') // Auto-switch to selection tool
+              } else {
+                const obj = objects.find(o => o.id === editingObjectId)
+                if (obj) {
+                  updateObject(editingObjectId, { data: { ...obj.data, content, ...properties } })
+                }
+              }
+              setEditingObjectId(null)
+              setTextEditPosition(null)
+            }}
+            onCancel={() => {
+              setEditingObjectId(null)
+              setTextEditPosition(null)
+            }}
+            onLiveUpdate={(content) => {
+              if (editingObjectId !== 'new-text' && collaboration) {
+                editorRuntime.updateTextLive(editingObjectId, content) // Keep using runtime for live updates to avoid store spam
+              }
+            }}
+          />
+        )
+      })()}
+
+      {/* Note Editor Overlay */}
+      {editingObjectId && noteEditPosition && (
+        <NoteEditorOverlay
+          position={noteEditPosition}
+          objectId={editingObjectId}
+          initialContent={editingObjectId === 'new' ? '' : (objects.find(o => o.id === editingObjectId)?.data as NoteData)?.content || ''}
+          initialBackgroundColor={editingObjectId === 'new' ? noteProperties.backgroundColor : (objects.find(o => o.id === editingObjectId)?.data as NoteData)?.backgroundColor || '#FFF2CC'}
+          onCommit={(content, backgroundColor) => {
+            if (editingObjectId === 'new') {
+              const noteObj: CanvasObject = {
+                id: `note-${Date.now()}`,
+                name: 'Sticky Note',
+                type: 'note',
+                transform: { x: noteEditPosition.x, y: noteEditPosition.y, rotation: 0, scaleX: 1, scaleY: 1, anchor: 'top-left' },
+                data: {
+                  content,
+                  backgroundColor: backgroundColor || noteProperties.backgroundColor || '#FFF2CC',
+                  backgroundType: noteProperties.backgroundType || 'plain',
+                  cornerRadius: 12,
+                  fontFamily: noteProperties.fontFamily || 'Inter',
+                  fontSize: 14,
+                  width: 200,
+                  height: 120
+                },
+                layerId: activeLayerId
+              }
+              addObject(noteObj)
+              setSelectedIds([noteObj.id])
+            } else {
+              const obj = objects.find(o => o.id === editingObjectId)
+              if (obj) {
+                const noteData = obj.data as NoteData
+                updateObject(editingObjectId, {
+                  data: {
+                    ...noteData,
+                    content,
+                    backgroundColor: backgroundColor || noteData.backgroundColor
+                  }
+                })
+              }
+            }
+            setEditingObjectId(null)
+            setNoteEditPosition(null)
+          }}
+          onCancel={() => {
+            setEditingObjectId(null)
+            setNoteEditPosition(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}

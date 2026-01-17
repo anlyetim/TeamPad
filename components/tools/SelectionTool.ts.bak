@@ -1,0 +1,314 @@
+// components/tools/SelectionTool.ts - GIMP-style selection with marching ants
+import type { ToolHandler, ToolContext } from '@/lib/toolRegistry'
+import type { Point, CanvasObject, SelectionMode } from '@/lib/types'
+import { useHaloboardStore } from '@/lib/store'
+
+interface SelectionState {
+    isSelecting: boolean
+    startPoint: Point | null
+    currentPoint: Point | null
+    mode: 'rect' | 'ellipse' | 'lasso'
+    lassoPoints: Point[]
+    marchingAntsOffset: number // For animated marching ants
+}
+
+const state: SelectionState = {
+    isSelecting: false,
+    startPoint: null,
+    currentPoint: null,
+    mode: 'rect',
+    lassoPoints: [],
+    marchingAntsOffset: 0
+}
+
+// Animation for marching ants
+let marchingAntsAnimationFrame: number | null = null
+
+function startMarchingAnts() {
+    if (marchingAntsAnimationFrame !== null) return
+
+    const animate = () => {
+        state.marchingAntsOffset = (state.marchingAntsOffset + 0.5) % 10
+        marchingAntsAnimationFrame = requestAnimationFrame(animate)
+    }
+    animate()
+}
+
+function stopMarchingAnts() {
+    if (marchingAntsAnimationFrame !== null) {
+        cancelAnimationFrame(marchingAntsAnimationFrame)
+        marchingAntsAnimationFrame = null
+    }
+}
+
+// Helper to determine mode from tool name
+const getMode = (name: string): 'rect' | 'ellipse' | 'lasso' => {
+    if (name === 'select-ellipse') return 'ellipse'
+    if (name === 'select-lasso') return 'lasso'
+    return 'rect'
+}
+
+export const SelectionTool: ToolHandler = {
+    name: 'select-rect',
+    cursor: 'crosshair',
+
+    onActivate: (ctx: ToolContext) => {
+        const store = useHaloboardStore.getState()
+        state.isSelecting = false
+        state.startPoint = null
+        state.currentPoint = null
+        state.lassoPoints = []
+        state.mode = getMode(store.activeTool)
+        startMarchingAnts()
+    },
+
+    onDeactivate: (ctx: ToolContext) => {
+        state.isSelecting = false
+        state.startPoint = null
+        state.currentPoint = null
+        state.lassoPoints = []
+        stopMarchingAnts()
+    },
+
+    onMouseDown: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        const store = useHaloboardStore.getState()
+        state.mode = getMode(store.activeTool)
+
+        state.isSelecting = true
+        state.startPoint = point
+        state.currentPoint = point
+        if (state.mode === 'lasso') {
+            state.lassoPoints = [point]
+        }
+    },
+
+    onMouseMove: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        if (!state.isSelecting) return
+
+        state.currentPoint = point
+        if (state.mode === 'lasso') {
+            // Add points with some spacing to avoid too many points
+            const lastPoint = state.lassoPoints[state.lassoPoints.length - 1]
+            const dist = Math.sqrt(
+                (point.x - lastPoint.x) ** 2 + (point.y - lastPoint.y) ** 2
+            )
+            if (dist > 3) { // Minimum spacing of 3 pixels
+                state.lassoPoints.push(point)
+            }
+        }
+    },
+
+    onMouseUp: (e: React.MouseEvent, point: Point, ctx: ToolContext) => {
+        if (!state.isSelecting || !state.startPoint) return
+
+        const store = useHaloboardStore.getState()
+        const objects = store.objects
+        const currentSelection = new Set(store.selectedIds)
+        const newSelection = new Set<string>()
+
+        // Perform selection based on geometry
+        if (state.mode === 'rect') {
+            const left = Math.min(state.startPoint.x, point.x)
+            const right = Math.max(state.startPoint.x, point.x)
+            const top = Math.min(state.startPoint.y, point.y)
+            const bottom = Math.max(state.startPoint.y, point.y)
+
+            objects.forEach(obj => {
+                const layer = store.layers.find(l => l.id === obj.layerId)
+                if (!layer?.visible || layer.locked) return
+
+                // Get object bounds
+                const bounds = getObjectBounds(obj)
+
+                // Check if object intersects selection rectangle
+                if (!(bounds.right < left || bounds.left > right ||
+                    bounds.bottom < top || bounds.top > bottom)) {
+                    newSelection.add(obj.id)
+                }
+            })
+        } else if (state.mode === 'ellipse') {
+            const centerX = (state.startPoint.x + point.x) / 2
+            const centerY = (state.startPoint.y + point.y) / 2
+            const rx = Math.abs(point.x - state.startPoint.x) / 2
+            const ry = Math.abs(point.y - state.startPoint.y) / 2
+
+            if (rx > 0 && ry > 0) {
+                objects.forEach(obj => {
+                    const layer = store.layers.find(l => l.id === obj.layerId)
+                    if (!layer?.visible || layer.locked) return
+
+                    const bounds = getObjectBounds(obj)
+                    const objCenterX = (bounds.left + bounds.right) / 2
+                    const objCenterY = (bounds.top + bounds.bottom) / 2
+
+                    // Check if object center is inside ellipse
+                    const dx = objCenterX - centerX
+                    const dy = objCenterY - centerY
+                    if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1) {
+                        newSelection.add(obj.id)
+                    }
+                })
+            }
+        } else if (state.mode === 'lasso') {
+            objects.forEach(obj => {
+                const layer = store.layers.find(l => l.id === obj.layerId)
+                if (!layer?.visible || layer.locked) return
+
+                if (isPointInPolygon(obj.transform, state.lassoPoints)) {
+                    newSelection.add(obj.id)
+                }
+            })
+        }
+
+        // Apply selection mode (Replace, Add, Subtract, Intersect)
+        const selectionMode = getSelectionMode(e)
+        const finalSelection = applySelectionMode(currentSelection, newSelection, selectionMode)
+
+        store.setSelectedIds(Array.from(finalSelection))
+
+        // Reset state
+        state.isSelecting = false
+        state.startPoint = null
+        state.currentPoint = null
+        state.lassoPoints = []
+    },
+
+    getCursor: (point: Point, ctx: ToolContext) => {
+        return 'crosshair'
+    },
+
+    renderOverlay: (ctx: CanvasRenderingContext2D, toolCtx: ToolContext) => {
+        if (!state.isSelecting || !state.startPoint || !state.currentPoint) return
+
+        const store = useHaloboardStore.getState()
+        const { highlightColor } = store
+
+        ctx.save()
+        ctx.strokeStyle = highlightColor
+        ctx.lineWidth = 1 / toolCtx.zoom
+        ctx.fillStyle = `${highlightColor}20`
+
+        // Marching ants effect
+        ctx.setLineDash([5, 5])
+        ctx.lineDashOffset = -state.marchingAntsOffset
+
+        if (state.mode === 'rect') {
+            const w = state.currentPoint.x - state.startPoint.x
+            const h = state.currentPoint.y - state.startPoint.y
+            ctx.fillRect(state.startPoint.x, state.startPoint.y, w, h)
+            ctx.strokeRect(state.startPoint.x, state.startPoint.y, w, h)
+        } else if (state.mode === 'ellipse') {
+            const centerX = (state.startPoint.x + state.currentPoint.x) / 2
+            const centerY = (state.startPoint.y + state.currentPoint.y) / 2
+            const rx = Math.abs(state.currentPoint.x - state.startPoint.x) / 2
+            const ry = Math.abs(state.currentPoint.y - state.startPoint.y) / 2
+
+            ctx.beginPath()
+            ctx.ellipse(centerX, centerY, rx, ry, 0, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+        } else if (state.mode === 'lasso') {
+            if (state.lassoPoints.length > 1) {
+                ctx.beginPath()
+                ctx.moveTo(state.lassoPoints[0].x, state.lassoPoints[0].y)
+                for (let i = 1; i < state.lassoPoints.length; i++) {
+                    ctx.lineTo(state.lassoPoints[i].x, state.lassoPoints[i].y)
+                }
+                ctx.lineTo(state.currentPoint.x, state.currentPoint.y)
+                ctx.closePath()
+                ctx.fill()
+                ctx.stroke()
+            }
+        }
+
+        ctx.restore()
+    }
+}
+
+/**
+ * Get selection mode based on modifier keys (GIMP-style)
+ * No modifiers = Replace
+ * Shift = Add
+ * Ctrl/Cmd = Subtract
+ * Shift + Ctrl/Cmd = Intersect
+ */
+function getSelectionMode(e: React.MouseEvent): SelectionMode {
+    if (e.shiftKey && (e.ctrlKey || e.metaKey)) return 'intersect'
+    if (e.ctrlKey || e.metaKey) return 'subtract'
+    if (e.shiftKey) return 'add'
+    return 'new' // Replace
+}
+
+/**
+ * Apply selection mode to combine current and new selections
+ */
+function applySelectionMode(
+    current: Set<string>,
+    newSel: Set<string>,
+    mode: SelectionMode
+): Set<string> {
+    switch (mode) {
+        case 'new':
+            return newSel
+        case 'add':
+            return new Set([...current, ...newSel])
+        case 'subtract':
+            return new Set([...current].filter(id => !newSel.has(id)))
+        case 'intersect':
+            return new Set([...current].filter(id => newSel.has(id)))
+        default:
+            return newSel
+    }
+}
+
+/**
+ * Get object bounding box in world coordinates
+ */
+function getObjectBounds(obj: CanvasObject): { left: number; top: number; right: number; bottom: number } {
+    let width = 0
+    let height = 0
+
+    switch (obj.type) {
+        case 'path':
+            const pathData = obj.data as any
+            if (pathData.points && pathData.points.length > 0) {
+                const xs = pathData.points.map((p: Point) => p.x)
+                const ys = pathData.points.map((p: Point) => p.y)
+                width = Math.max(...xs) - Math.min(...xs)
+                height = Math.max(...ys) - Math.min(...ys)
+            }
+            break
+        default:
+            width = (obj.data as any).width || 0
+            height = (obj.data as any).height || 0
+    }
+
+    const scaleX = obj.transform.scaleX
+    const scaleY = obj.transform.scaleY
+
+    return {
+        left: obj.transform.x,
+        top: obj.transform.y,
+        right: obj.transform.x + width * scaleX,
+        bottom: obj.transform.y + height * scaleY
+    }
+}
+
+/**
+ * Ray-casting algorithm for point-in-polygon test
+ */
+function isPointInPolygon(point: { x: number, y: number }, vs: Point[]): boolean {
+    const x = point.x, y = point.y
+    let inside = false
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i].x, yi = vs[i].y
+        const xj = vs[j].x, yj = vs[j].y
+
+        const intersect = ((yi > y) !== (yj > y))
+            && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+        if (intersect) inside = !inside
+    }
+    return inside
+}
+
+export default SelectionTool
